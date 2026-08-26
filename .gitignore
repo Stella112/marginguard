@@ -47,3 +47,7 @@ A1priv/A1priv.ts
 
 # cairo build artifacts
 /cairo/target/
+
+# Scarb / Cairo build output
+contracts/target/
+cairo/target/

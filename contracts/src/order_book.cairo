@@ -52,9 +52,18 @@ pub trait IOrderBook<T> {
         sell_salt: felt252,
     );
 
+    /// Binds the book to its venue, once. Placement and cancellation are restricted to that
+    /// venue thereafter.
+    ///
+    /// This exists because the venue's constructor takes the book's address, so the two
+    /// cannot both know each other at deployment. The book is deployed first, the venue
+    /// second, and this call closes the loop.
+    fn initialize_venue(ref self: T, venue: ContractAddress);
+
     fn get_order(self: @T, order_id: felt252) -> OrderEntry;
     fn is_live(self: @T, order_id: felt252) -> bool;
     fn is_matched(self: @T, order_id: felt252) -> bool;
+    fn venue(self: @T) -> ContractAddress;
 
     /// Execution price and filled size recorded for a matched order. Zero if unmatched.
     /// Public post-trade by necessity: the claim leg credits an open note, whose amount is
@@ -79,19 +88,27 @@ pub mod errors {
     pub const SELF_MATCH: felt252 = 'SELF_MATCH';
     pub const ZERO_SIZE: felt252 = 'ZERO_SIZE';
     pub const ZERO_PRICE: felt252 = 'ZERO_PRICE';
+    pub const CALLER_NOT_VENUE: felt252 = 'CALLER_NOT_VENUE';
+    pub const VENUE_ALREADY_SET: felt252 = 'VENUE_ALREADY_SET';
+    pub const ZERO_VENUE: felt252 = 'ZERO_VENUE';
 }
 
 #[starknet::contract]
 pub mod OrderBook {
     use core::num::traits::Zero;
-    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
-    use starknet::ContractAddress;
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
+    use starknet::{ContractAddress, get_caller_address};
     use crate::commitments::{compute_order_commitment, compute_trader_commitment};
     use crate::types::{OrderEntry, SIDE_BUY, SIDE_SELL};
     use super::{IOrderBook, errors};
 
     #[storage]
     struct Storage {
+        /// The venue permitted to place and cancel. Matching stays permissionless.
+        venue: ContractAddress,
         orders: Map<felt252, OrderEntry>,
         /// Execution price per matched order.
         fill_price: Map<felt252, u128>,
@@ -142,6 +159,10 @@ pub mod OrderBook {
             base_token: ContractAddress,
             quote_token: ContractAddress,
         ) {
+            // Only the venue may place, because only the venue reserves the backing funds.
+            // An unbacked order left resting in the book would grief whoever matched it:
+            // the match would succeed and the claim would find nothing to pay.
+            self.assert_caller_is_venue();
             assert(order_id.is_non_zero(), errors::ZERO_ORDER_ID);
             assert(commitment.is_non_zero(), errors::ZERO_COMMITMENT);
             assert(trader_commitment.is_non_zero(), errors::ZERO_TRADER_COMMITMENT);
@@ -171,6 +192,8 @@ pub mod OrderBook {
         }
 
         fn cancel_order(ref self: ContractState, order_id: felt252, owner_secret: felt252) {
+            // Routed through the venue so the reserve is released in the same transaction.
+            self.assert_caller_is_venue();
             let entry = self.orders.read(order_id);
             assert(entry.commitment.is_non_zero(), errors::ORDER_NOT_FOUND);
             // Matched is checked before live: a match clears `live` and sets `matched`, so
@@ -261,8 +284,18 @@ pub mod OrderBook {
                 );
         }
 
+        fn initialize_venue(ref self: ContractState, venue: ContractAddress) {
+            assert(venue.is_non_zero(), errors::ZERO_VENUE);
+            assert(self.venue.read().is_zero(), errors::VENUE_ALREADY_SET);
+            self.venue.write(venue);
+        }
+
         fn get_order(self: @ContractState, order_id: felt252) -> OrderEntry {
             self.orders.read(order_id)
+        }
+
+        fn venue(self: @ContractState) -> ContractAddress {
+            self.venue.read()
         }
 
         fn is_live(self: @ContractState, order_id: felt252) -> bool {
@@ -275,6 +308,16 @@ pub mod OrderBook {
 
         fn get_fill(self: @ContractState, order_id: felt252) -> (u128, u128) {
             (self.fill_price.read(order_id), self.fill_size.read(order_id))
+        }
+    }
+
+    #[generate_trait]
+    impl InternalImpl of InternalTrait {
+        fn assert_caller_is_venue(self: @ContractState) {
+            let venue = self.venue.read();
+            // An uninitialised book has no venue and accepts nothing, rather than defaulting
+            // open until someone remembers to close it.
+            assert(venue.is_non_zero() && get_caller_address() == venue, errors::CALLER_NOT_VENUE);
         }
     }
 }

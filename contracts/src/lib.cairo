@@ -21,6 +21,7 @@ pub mod types;
 
 pub mod agent_registry;
 pub mod order_book;
+pub mod venue;
 
 #[cfg(test)]
 mod tests;

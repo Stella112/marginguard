@@ -1,11 +1,20 @@
 use starknet::ContractAddress;
+use starknet::testing::set_caller_address;
 use crate::commitments::{compute_order_commitment, compute_trader_commitment};
 use crate::order_book::OrderBook;
 use crate::order_book::OrderBook::OrderBookImpl;
 use crate::types::{SIDE_BUY, SIDE_SELL};
 
+fn venue() -> ContractAddress {
+    0x5E10E.try_into().unwrap()
+}
+
+/// A book bound to its venue, with the venue as caller — the state placement actually runs in.
 fn state() -> OrderBook::ContractState {
-    OrderBook::contract_state_for_testing()
+    let mut s = OrderBook::contract_state_for_testing();
+    OrderBookImpl::initialize_venue(ref s, venue());
+    set_caller_address(venue());
+    s
 }
 
 fn base() -> ContractAddress {
@@ -252,4 +261,62 @@ fn base_and_quote_must_differ() {
         base(),
         base(),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Venue binding.
+//
+// Placement is gated because only the venue reserves the backing funds. An unbacked
+// order resting in the book would grief whoever matched it: the match succeeds and
+// the claim then finds nothing to pay.
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic(expected: ('CALLER_NOT_VENUE',))]
+fn a_stranger_cannot_place_directly_on_the_book() {
+    let mut s = state();
+    set_caller_address(0xDEAD.try_into().unwrap());
+    place_buy(ref s, 'o1', 1500, 100);
+}
+
+#[test]
+#[should_panic(expected: ('CALLER_NOT_VENUE',))]
+fn a_stranger_cannot_cancel_directly_on_the_book() {
+    let mut s = state();
+    place_buy(ref s, 'o1', 1500, 100);
+
+    set_caller_address(0xDEAD.try_into().unwrap());
+    OrderBookImpl::cancel_order(ref s, 'o1', BUY_SECRET);
+}
+
+/// An uninitialised book accepts nothing, rather than defaulting open until someone
+/// remembers to bind it.
+#[test]
+#[should_panic(expected: ('CALLER_NOT_VENUE',))]
+fn an_unbound_book_accepts_no_placement() {
+    let mut s = OrderBook::contract_state_for_testing();
+    set_caller_address(venue());
+    place_buy(ref s, 'o1', 1500, 100);
+}
+
+#[test]
+#[should_panic(expected: ('VENUE_ALREADY_SET',))]
+fn the_venue_binding_is_one_time() {
+    let mut s = state();
+    OrderBookImpl::initialize_venue(ref s, 0xBEEF.try_into().unwrap());
+}
+
+/// Matching stays permissionless. It is deterministic and commitment-verified, so anyone
+/// may run it without being trusted — which is what keeps the venue from being a
+/// privileged matcher.
+#[test]
+fn anyone_may_match() {
+    let mut s = state();
+    place_buy(ref s, 'b1', 1600, 100);
+    place_sell(ref s, 's1', 1400, 100);
+
+    set_caller_address(0xDEAD.try_into().unwrap());
+    OrderBookImpl::match_orders(ref s, 'b1', 1600, 100, BUY_SALT, 's1', 1400, 100, SELL_SALT);
+
+    assert(OrderBookImpl::is_matched(@s, 'b1'), 'matched by a stranger');
 }

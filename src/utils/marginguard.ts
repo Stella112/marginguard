@@ -4,7 +4,7 @@
 // same Poseidon layout. Parity is asserted by the Cairo test that cross-checks these values
 // against scripts/gen_signature_vector.mjs, so what the UI shows is what the contract stores.
 
-import { RpcProvider, hash, shortString, num } from "starknet";
+import { RpcProvider, hash, shortString, num, ec } from "starknet";
 
 // ─── Sepolia deployment (live, verified on-chain 2026-08-27) ────────────────
 export const SEPOLIA_RPC = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_8";
@@ -60,6 +60,58 @@ export function positionCommitment(
     felt(leverage),
     salt,
   ]);
+}
+
+/// Domain tag for the owner→agent viewing grant mask (app-level, on STRK20's ECDH scheme).
+const GRANT_TAG = shortString.encodeShortString("MG_VIEW_GRANT:V1");
+const STARK_PRIME = 2n ** 251n + 17n * 2n ** 192n + 1n;
+
+/** Browser-safe bytes → 0x-hex (no Buffer dependency). */
+function bytesToHex(b: Uint8Array): string {
+  let h = "0x";
+  for (const x of b) h += x.toString(16).padStart(2, "0");
+  return h;
+}
+
+/**
+ * Full owner→agent grant round-trip, for the Privacy Center demo. The owner encrypts a viewing
+ * `capability` to the agent's key; the agent recovers it from its private key and the ephemeral
+ * point. Proves the mechanism end to end — real STARK-curve ECDH, real Poseidon masking.
+ */
+export function grantRoundTrip(
+  capability: string,
+  agentPriv: string,
+): {
+  agentPub: string;
+  ephemeralOnChain: string;
+  ciphertext: string;
+  sharedX: string;
+  recovered: string;
+  ok: boolean;
+} {
+  const compressed = ec.starkCurve.getPublicKey(agentPriv); // bytes
+  const agentPub = bytesToHex(compressed);
+  // Owner side. getSharedSecret takes the pubkey as raw bytes.
+  const r = randomFelt();
+  const rG = ec.starkCurve.getPublicKey(r); // bytes
+  const sOwner = ec.starkCurve.getSharedSecret(r, compressed);
+  const sharedX = num.toHex(BigInt(bytesToHex(sOwner.slice(1, 33))) % STARK_PRIME);
+  const mask = hash.computePoseidonHashOnElements([GRANT_TAG, sharedX]);
+  const ciphertext = num.toHex((BigInt(capability) + BigInt(mask)) % STARK_PRIME);
+  const ephemeralOnChain = num.toHex(BigInt(bytesToHex(rG.slice(1, 33))) % STARK_PRIME);
+  // Agent side: recover the shared secret from its private key and the full ephemeral point.
+  const sAgent = ec.starkCurve.getSharedSecret(agentPriv, rG);
+  const sharedX2 = num.toHex(BigInt(bytesToHex(sAgent.slice(1, 33))) % STARK_PRIME);
+  const mask2 = hash.computePoseidonHashOnElements([GRANT_TAG, sharedX2]);
+  const recovered = num.toHex((BigInt(ciphertext) - BigInt(mask2) + STARK_PRIME) % STARK_PRIME);
+  return {
+    agentPub,
+    ephemeralOnChain,
+    ciphertext,
+    sharedX,
+    recovered,
+    ok: BigInt(recovered) === BigInt(capability),
+  };
 }
 
 /** poseidon(PROPOSAL_TAG, position_id, kind, value, nonce) */
@@ -161,4 +213,29 @@ export async function readAgent(address: string): Promise<AgentInfo> {
     policy = null;
   }
   return { registered, publicKey, nonce, policy };
+}
+
+export type ViewGrant = {
+  agent: string;
+  ephemeral: string;
+  ciphertext: string;
+  active: boolean;
+};
+
+/** Reads a position's on-chain viewing grant from the perp engine. */
+export async function readViewGrant(positionId: string): Promise<ViewGrant> {
+  // get_view_grant returns ViewGrant { agent, ephemeral, ciphertext, active }
+  const r = await call(MG.perpEngine, "get_view_grant", [positionId]);
+  return {
+    agent: r[0],
+    ephemeral: r[1],
+    ciphertext: r[2],
+    active: BigInt(r[3]) === 1n,
+  };
+}
+
+/** The agent's registered viewing public key (x-coordinate reference), or 0 if none. */
+export async function readAgentViewingKey(agent: string): Promise<string> {
+  const [vk] = await call(MG.agentRegistry, "agent_viewing_key", [agent]);
+  return vk;
 }

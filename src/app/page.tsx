@@ -18,8 +18,11 @@ import {
   readProvider,
   readVenueStatus,
   readAgent,
+  readViewGrant,
+  grantRoundTrip,
   type VenueStatus,
   type AgentInfo,
+  type ViewGrant,
 } from "@/utils/marginguard";
 
 function Addr({ a }: { a: string }) {
@@ -396,6 +399,138 @@ function AgentPanel() {
   );
 }
 
+// ─── Privacy Center: viewing-key delegation ─────────────────────────────────
+function PrivacyCenter() {
+  // Client-side grant round-trip (real STARK-curve ECDH), regenerated on demand.
+  const [agentPriv, setAgentPriv] = useState("");
+  const [capability, setCapability] = useState("");
+  useEffect(() => {
+    setAgentPriv(randomFelt());
+    setCapability(randomFelt());
+  }, []);
+
+  const demo = agentPriv && capability ? grantRoundTrip(capability, agentPriv) : null;
+
+  // Live on-chain grant lookup.
+  const [posId, setPosId] = useState("");
+  const [grant, setGrant] = useState<ViewGrant | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function lookup() {
+    setErr("");
+    setGrant(null);
+    if (!posId) return;
+    try {
+      setBusy(true);
+      setGrant(await readViewGrant(posId));
+    } catch (e: unknown) {
+      setErr(`lookup failed: ${(e as Error)?.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={`${styles.card} ${styles.cardWide}`}>
+      <p className={styles.cardTitle}>Privacy Center — viewing-key delegation (IDEA-21)</p>
+
+      <p className={styles.note} style={{ marginTop: 0, marginBottom: 16 }}>
+        Positions are hidden from the public and other traders — <strong>not</strong> from the
+        agent that protects them. When you open a position you grant the agent a scoped, revocable
+        view, using STRK20&apos;s own ECDH-on-the-STARK-curve scheme. The chain records only that a
+        grant exists; the values stay off-chain. Below is that grant, computed live in your browser.
+      </p>
+
+      <div className={styles.split}>
+        <div className={`${styles.panel} ${styles.panelHidden}`}>
+          <div className={styles.panelHead}>🔒 Owner encrypts to the agent</div>
+          <div className={styles.kv}>
+            <span className={styles.label}>agent viewing key</span>
+            <span className={styles.mono}>{short(demo?.agentPub ?? "")}</span>
+          </div>
+          <div className={styles.kv}>
+            <span className={styles.label}>viewing capability</span>
+            <span className={styles.mono}>{short(capability)}</span>
+          </div>
+          <div className={styles.kv}>
+            <span className={styles.label}>ECDH shared secret</span>
+            <span className={styles.mono}>{short(demo?.sharedX ?? "")}</span>
+          </div>
+        </div>
+
+        <div className={`${styles.panel} ${styles.panelPublic}`}>
+          <div className={styles.panelHead}>🌐 Grant record on chain</div>
+          <div className={styles.kv}>
+            <span className={styles.label}>ephemeral rG.x</span>
+            <span className={styles.mono}>{short(demo?.ephemeralOnChain ?? "")}</span>
+          </div>
+          <div className={styles.kv}>
+            <span className={styles.label}>ciphertext</span>
+            <span className={styles.mono}>{short(demo?.ciphertext ?? "")}</span>
+          </div>
+          <div className={styles.kv}>
+            <span className={styles.label}>agent recovers</span>
+            <span className={demo?.ok ? styles.ok : styles.bad}>
+              {demo ? (demo.ok ? "✓ exact capability" : "✗ mismatch") : "…"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <button
+        className={`${styles.btn} ${styles.btnGhost}`}
+        onClick={() => {
+          setAgentPriv(randomFelt());
+          setCapability(randomFelt());
+        }}
+      >
+        ↻ regenerate grant
+      </button>
+
+      <p className={styles.note}>
+        The public grant record reveals nothing: only the agent, holding its private viewing key,
+        recovers the capability from the ephemeral point (recovered value equals the original,
+        proven above). Anyone else sees two random field elements. On-chain,{" "}
+        <span className={styles.mono}>PerpEngine.grant_view</span> stores this and{" "}
+        <span className={styles.mono}>revoke_view</span> retires it — both owner-gated.
+      </p>
+
+      <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
+        <div className={styles.field}>
+          <label>Look up a live grant by position id</label>
+          <input
+            className={styles.input}
+            placeholder="e.g. 0x… position id"
+            value={posId}
+            onChange={(e) => setPosId(e.target.value.trim())}
+          />
+        </div>
+        <button className={`${styles.btn} ${styles.btnGhost}`} disabled={busy} onClick={lookup}>
+          Look up grant
+        </button>
+        {grant && (
+          <div style={{ marginTop: 12 }}>
+            <div className={styles.row}>
+              <span className={styles.label}>granted agent</span>
+              <span className={styles.mono}>
+                {BigInt(grant.agent) === 0n ? "none" : short(grant.agent)}
+              </span>
+            </div>
+            <div className={styles.row}>
+              <span className={styles.label}>status</span>
+              <span className={grant.active ? styles.ok : styles.label}>
+                {BigInt(grant.agent) === 0n ? "no grant" : grant.active ? "active" : "revoked"}
+              </span>
+            </div>
+          </div>
+        )}
+        {err && <div className={`${styles.status} ${styles.statusErr}`}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function Page() {
   return (
     <div className={styles.page}>
@@ -435,6 +570,7 @@ export default function Page() {
           <VenueStatusCard />
           <AgentPanel />
           <CommitmentLab />
+          <PrivacyCenter />
 
           <div className={`${styles.card} ${styles.cardWide}`}>
             <p className={styles.cardTitle}>How a private trade settles</p>

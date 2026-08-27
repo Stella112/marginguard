@@ -56,10 +56,16 @@ function Get-ClassHash($name) {
 
 # Declare a class. Idempotent: an already-declared class exits 0 with a note. A real failure
 # (bad account, no funds) is a nonzero exit we surface.
+#
+# --casm-file supplies Scarb's already-compiled CASM, so starkli does NOT run its own bundled
+# Sierra->CASM compiler. starkli 0.4.2's compiler predates Sierra 1.8.0 (emitted by Scarb 2.18)
+# and would otherwise fail with "unsupported Sierra version: 1.8.0".
 function Invoke-Declare($name) {
     $sierra = Join-Path $dev "marginguard_$name.contract_class.json"
+    $casm = Join-Path $dev "marginguard_$name.compiled_contract_class.json"
+    if (-not (Test-Path $casm)) { Fail "missing CASM: $casm (run 'scarb build')" }
     Write-Host "==> declaring $name" -ForegroundColor Cyan
-    & $starkli declare $sierra --watch
+    & $starkli declare $sierra --casm-file $casm --watch
     if ($LASTEXITCODE -ne 0) {
         Fail "declare $name failed (exit $LASTEXITCODE). If it says 'already declared', that is fine - re-run and it will skip."
     }

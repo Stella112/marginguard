@@ -71,18 +71,27 @@ async function invoke(label, contractAddress, entrypoint, calldata) {
   console.log(`    tx ${res.transaction_hash}`)
 }
 
+// Oracle: a real Ekubo TWAP adapter when EKUBO_ORACLE is set (mainnet), else the owner-settable
+// ManualOracle stand-in (testnet, where the Ekubo STRK/USDC pool may not exist).
+const EKUBO = process.env.EKUBO_ORACLE
+const TWAP_PERIOD = process.env.TWAP_PERIOD || "1800"
+const oracleName = EKUBO ? "EkuboTwapOracle" : "ManualOracle"
+
 const registryClass = await declare("AgentRegistry")
-const oracleClass = await declare("ManualOracle")
+const oracleClass = await declare(oracleName)
 const perpClass = await declare("PerpEngine")
 const bookClass = await declare("OrderBook")
 const venueClass = await declare("MarginGuardVenue")
 
 const registry = await deploy("AgentRegistry", registryClass, [])
 const oracle = await deploy(
-  "ManualOracle",
+  oracleName,
   oracleClass,
-  CallData.compile({ owner: address, initial_price: INITIAL_PRICE.toString() }),
+  EKUBO
+    ? CallData.compile({ ekubo_oracle: EKUBO, period: TWAP_PERIOD })
+    : CallData.compile({ owner: address, initial_price: INITIAL_PRICE.toString() }),
 )
+if (EKUBO) console.log(`    (Ekubo TWAP oracle: ${EKUBO}, period ${TWAP_PERIOD}s)`)
 const perp = await deploy("PerpEngine", perpClass, CallData.compile({ oracle }))
 const book = await deploy("OrderBook", bookClass, [])
 const venue = await deploy(
@@ -95,11 +104,12 @@ await invoke("book.initialize_venue", book, "initialize_venue", [venue])
 await invoke("registry.initialize_executor", registry, "initialize_executor", [perp])
 await invoke("perp.initialize_agent_registry", perp, "initialize_agent_registry", [registry])
 
+const netName = RPC.includes("mainnet") ? "mainnet" : "sepolia"
 const summary = [
   "",
-  "============ DEPLOYED — FULL (Sepolia) ============",
+  `============ DEPLOYED — FULL (${netName}) ============`,
   `AgentRegistry    : ${registry}`,
-  `ManualOracle     : ${oracle}`,
+  `${oracleName.padEnd(16)} : ${oracle}`,
   `PerpEngine       : ${perp}`,
   `OrderBook        : ${book}`,
   `MarginGuardVenue : ${venue}`,

@@ -1,5 +1,6 @@
 mod mock_erc20;
 mod mock_oracle;
+mod mock_ekubo;
 mod test_commitments;
 mod test_agent_registry;
 mod test_agent_signature;
@@ -8,3 +9,4 @@ mod test_venue;
 mod test_perp;
 mod test_agent_risk;
 mod test_view_grant;
+mod test_ekubo_oracle;

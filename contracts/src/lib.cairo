@@ -26,6 +26,7 @@ pub mod venue;
 pub mod oracle;
 pub mod perp;
 pub mod oracle_manual;
+pub mod oracle_ekubo;
 
 #[cfg(test)]
 mod tests;

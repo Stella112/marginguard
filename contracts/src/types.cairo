@@ -103,3 +103,22 @@ pub struct OrderEntry {
     /// True once the owner has claimed the proceeds into an open note.
     pub claimed: bool,
 }
+
+/// A perpetual position.
+///
+/// Like an order, only the commitments, the market, and the lifecycle flags are public. Side,
+/// size, entry price, margin and leverage live inside `commitment` and are revealed to the
+/// contract only when an action must evaluate the position — see the PerpEngine module docs.
+#[derive(Serde, Copy, Drop, PartialEq, Debug, starknet::Store)]
+pub struct PositionEntry {
+    /// `poseidon(TRADER_TAG, owner_secret)` — binds the owner without naming an address.
+    pub trader_commitment: felt252,
+    /// `poseidon(POSITION_TAG, side, size, entry_price, margin, leverage, salt)`.
+    pub commitment: felt252,
+    pub base_token: starknet::ContractAddress,
+    pub quote_token: starknet::ContractAddress,
+    /// True while the position is live; false once closed or liquidated.
+    pub open: bool,
+    /// True if the position was closed by liquidation rather than by its owner.
+    pub liquidated: bool,
+}

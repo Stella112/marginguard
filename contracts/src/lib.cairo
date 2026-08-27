@@ -23,5 +23,8 @@ pub mod agent_registry;
 pub mod order_book;
 pub mod venue;
 
+pub mod oracle;
+pub mod perp;
+
 #[cfg(test)]
 mod tests;

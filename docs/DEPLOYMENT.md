@@ -86,6 +86,27 @@ Pick the RPC and pool for the target network:
 > wallet (send any small amount, or use the wallet's "Activate/Deploy account" action) before
 > `account fetch`, or it returns `Contract not found`.
 
+> **Argent/Ready accounts with a guardian cannot be driven by starkli.** A default
+> Argent/Ready account carries a **guardian** (2FA / Argent Shield), so it requires TWO
+> signatures — the owner's and the guardian's, the latter held by Argent's service. starkli
+> signs with only the owner key, so the account rejects it with
+> `argent/invalid-signature-length`. Two ways around it:
+>
+> 1. Remove the guardian in the wallet's security settings (may require a delay / 2FA), then
+>    `account fetch` and use it directly, or
+> 2. Create a plain single-signer account starkli can drive on its own, reusing the same key:
+>    ```
+>    starkli account oz init C:\Users\Admin\.starkli\oz_account.json --keystore C:\Users\Admin\.starkli\keystore.json
+>    ```
+>    Fund the printed address (send STRK from the wallet, or a faucet), then
+>    `starkli account deploy C:\Users\Admin\.starkli\oz_account.json`. Point `$env:STARKNET_ACCOUNT`
+>    at `oz_account.json` for the contract deploy.
+
+> **starkli 0.4.2 vs Sierra 1.8.0.** starkli's bundled compiler predates the Sierra that Scarb
+> 2.18 emits and fails with `unsupported Sierra version: 1.8.0`. The deploy script passes
+> Scarb's already-compiled CASM via `--casm-file`, so starkli skips its own compiler. Sepolia
+> (Starknet 0.14.3) accepts the class.
+
 ```powershell
 $env:STARKNET_ACCOUNT  = "C:\Users\Admin\.starkli\account.json"
 $env:STARKNET_KEYSTORE = "C:\Users\Admin\.starkli\keystore.json"

@@ -88,11 +88,56 @@ pub trait IPerpEngine<T> {
         salt: felt252,
     ) -> bool;
 
+    /// Binds the engine to the agent registry it consumes proposals through. One-time, done
+    /// right after deploy — the registry's executor and the engine's registry point at each
+    /// other, so neither can be set at the other's construction.
+    fn initialize_agent_registry(ref self: T, registry: ContractAddress);
+
+    /// Applies an agent's signed risk adjustment to a live position.
+    ///
+    /// **The agent proposes; the contract verifies; the contract enforces.** The caller reveals
+    /// the position's current committed values (so the engine can act on real state), and the
+    /// engine:
+    ///   1. re-derives and checks the current commitment,
+    ///   2. calls `registry.consume_proposal`, which verifies the agent's identity, signature,
+    ///      policy bounds and nonce, and burns the nonce — reverting the whole call if any
+    ///      check fails,
+    ///   3. applies the effect and stores a fresh commitment (or settles, for a close).
+    ///
+    /// The agent supplies only a signature. It cannot move funds, cannot write state here, and
+    /// cannot push a position past its policy — a compromised agent key is survivable (T5).
+    ///
+    /// Privacy note: like close and liquidate, this **reveals** the position's economics at
+    /// adjustment time (they appear in calldata). A position that is never adjusted stays
+    /// shielded until it closes; an adjusted one is disclosed at the moment it is adjusted.
+    /// This is the unavoidable consequence of having no user-supplied circuit (C2).
+    fn adjust_position(
+        ref self: T,
+        position_id: felt252,
+        // Current committed values, revealed:
+        side: u8,
+        size: u128,
+        entry_price: u128,
+        margin: u128,
+        leverage: u8,
+        salt: felt252,
+        // The signed proposal:
+        kind: u8,
+        value: u128,
+        agent: ContractAddress,
+        nonce: u64,
+        signature_r: felt252,
+        signature_s: felt252,
+        // Salt for the resulting commitment (keeps the adjusted values re-shielded):
+        new_salt: felt252,
+    );
+
     fn get_position(self: @T, position_id: felt252) -> PositionEntry;
     fn is_open(self: @T, position_id: felt252) -> bool;
     /// (settlement_token, settlement_amount) recorded once a position closes or liquidates.
     fn get_settlement(self: @T, position_id: felt252) -> (ContractAddress, u128);
     fn oracle(self: @T) -> ContractAddress;
+    fn agent_registry(self: @T) -> ContractAddress;
 }
 
 pub mod errors {
@@ -113,6 +158,11 @@ pub mod errors {
     pub const COMMITMENT_MISMATCH: felt252 = 'COMMITMENT_MISMATCH';
     pub const NOT_LIQUIDATABLE: felt252 = 'NOT_LIQUIDATABLE';
     pub const VALUE_OVERFLOW: felt252 = 'VALUE_OVERFLOW';
+    pub const ZERO_REGISTRY: felt252 = 'ZERO_REGISTRY';
+    pub const REGISTRY_ALREADY_SET: felt252 = 'REGISTRY_ALREADY_SET';
+    pub const REGISTRY_NOT_SET: felt252 = 'REGISTRY_NOT_SET';
+    pub const ADJUST_TO_ZERO_SIZE: felt252 = 'ADJUST_TO_ZERO_SIZE';
+    pub const UNKNOWN_KIND: felt252 = 'UNKNOWN_KIND';
 }
 
 /// Maintenance margin as a fraction of posted margin. The brief fixes it at 50%.
@@ -130,9 +180,13 @@ pub mod PerpEngine {
         StoragePointerWriteAccess,
     };
     use starknet::ContractAddress;
+    use crate::agent_registry::{IAgentRegistryDispatcher, IAgentRegistryDispatcherTrait};
     use crate::commitments::{compute_position_commitment, compute_trader_commitment};
     use crate::oracle::{IPriceOracleDispatcher, IPriceOracleDispatcherTrait};
-    use crate::types::{PositionEntry, SIDE_BUY, SIDE_SELL};
+    use crate::types::{
+        KIND_ADJUST_LEVERAGE, KIND_CLOSE_POSITION, KIND_INCREASE_MARGIN, KIND_REDUCE_SIZE,
+        PositionEntry, SIDE_BUY, SIDE_SELL,
+    };
     use super::{
         BPS_DENOMINATOR, IPerpEngine, MAINTENANCE_BPS, MAX_LEVERAGE, errors,
     };
@@ -143,6 +197,7 @@ pub mod PerpEngine {
     #[storage]
     struct Storage {
         oracle: ContractAddress,
+        agent_registry: ContractAddress,
         positions: Map<felt252, PositionEntry>,
         settlement_token: Map<felt252, ContractAddress>,
         settlement_amount: Map<felt252, u128>,
@@ -154,6 +209,18 @@ pub mod PerpEngine {
         PositionOpened: PositionOpened,
         PositionClosed: PositionClosed,
         PositionLiquidated: PositionLiquidated,
+        PositionAdjusted: PositionAdjusted,
+    }
+
+    /// Agent identity and the action type are public by design; the position's economics are
+    /// not carried in the event.
+    #[derive(Drop, starknet::Event)]
+    pub struct PositionAdjusted {
+        #[key]
+        pub position_id: felt252,
+        #[key]
+        pub agent: ContractAddress,
+        pub kind: u8,
     }
 
     /// Existence and market are public; economics are not.
@@ -254,6 +321,66 @@ pub mod PerpEngine {
             );
         }
 
+        fn initialize_agent_registry(ref self: ContractState, registry: ContractAddress) {
+            assert(registry.is_non_zero(), errors::ZERO_REGISTRY);
+            assert(self.agent_registry.read().is_zero(), errors::REGISTRY_ALREADY_SET);
+            self.agent_registry.write(registry);
+        }
+
+        fn adjust_position(
+            ref self: ContractState,
+            position_id: felt252,
+            side: u8,
+            size: u128,
+            entry_price: u128,
+            margin: u128,
+            leverage: u8,
+            salt: felt252,
+            kind: u8,
+            value: u128,
+            agent: ContractAddress,
+            nonce: u64,
+            signature_r: felt252,
+            signature_s: felt252,
+            new_salt: felt252,
+        ) {
+            let registry_addr = self.agent_registry.read();
+            assert(registry_addr.is_non_zero(), errors::REGISTRY_NOT_SET);
+
+            // 1. The position is real and the revealed values match its commitment.
+            let entry = self.open_and_verified(position_id, side, size, entry_price, margin, leverage, salt);
+
+            // 2. The contract — not the agent — verifies identity, signature, policy and nonce,
+            //    and burns the nonce. Reverts the whole call if the proposal is not valid.
+            IAgentRegistryDispatcher { contract_address: registry_addr }
+                .consume_proposal(agent, position_id, kind, value, nonce, signature_r, signature_s);
+
+            // 3. Enforce the effect. A close settles and ends here; the others re-commit.
+            if kind == KIND_CLOSE_POSITION {
+                let price = self.price_of(entry);
+                let equity = equity_of(side, size, entry_price, margin, price);
+                self.settle(position_id, entry, equity);
+                self.emit(
+                    PositionClosed {
+                        position_id, settlement_token: entry.quote_token, settlement_amount: equity,
+                    },
+                );
+                self.emit(PositionAdjusted { position_id, agent, kind });
+                return;
+            }
+
+            let (new_size, new_margin, new_leverage) = apply_effect(
+                kind, size, margin, leverage, value,
+            );
+
+            let new_commitment = compute_position_commitment(
+                side, new_size, entry_price, new_margin, new_leverage, new_salt,
+            );
+            self.positions.write(position_id, PositionEntry { commitment: new_commitment, ..entry });
+
+            self.emit(PositionAdjusted { position_id, agent, kind });
+        }
+
         fn liquidate(
             ref self: ContractState,
             position_id: felt252,
@@ -323,6 +450,10 @@ pub mod PerpEngine {
         fn oracle(self: @ContractState) -> ContractAddress {
             self.oracle.read()
         }
+
+        fn agent_registry(self: @ContractState) -> ContractAddress {
+            self.agent_registry.read()
+        }
     }
 
     #[generate_trait]
@@ -373,6 +504,37 @@ pub mod PerpEngine {
             self.positions.write(position_id, entry);
             self.settlement_token.write(position_id, entry.quote_token);
             self.settlement_amount.write(position_id, amount);
+        }
+    }
+
+    /// Computes the adjusted (size, margin, leverage) for a non-close proposal.
+    ///
+    /// `value` is interpreted per kind, matching the registry's `within_policy`: basis points
+    /// for margin and size moves, an absolute leverage figure for a leverage change. The
+    /// registry has already confirmed `value` is within the agent's policy before this runs.
+    ///
+    /// A margin increase changes only the *committed* margin; the matching collateral top-up is
+    /// funded through the venue's rails (custody boundary — see the module docs).
+    fn apply_effect(kind: u8, size: u128, margin: u128, leverage: u8, value: u128) -> (u128, u128, u8) {
+        let bps: u256 = BPS_DENOMINATOR.into();
+        if kind == KIND_INCREASE_MARGIN {
+            let product: u256 = margin.into() * value.into();
+            let add: u128 = (product / bps).try_into().expect(errors::VALUE_OVERFLOW);
+            (size, margin + add, leverage)
+        } else if kind == KIND_REDUCE_SIZE {
+            let product: u256 = size.into() * value.into();
+            let cut: u128 = (product / bps).try_into().expect(errors::VALUE_OVERFLOW);
+            let new_size = size - cut;
+            // A 100% reduction must go through close, not leave a zero-size position resting.
+            assert(new_size.is_non_zero(), errors::ADJUST_TO_ZERO_SIZE);
+            (new_size, margin, leverage)
+        } else if kind == KIND_ADJUST_LEVERAGE {
+            // Policy guaranteed 0 < value <= max_leverage <= MAX_LEVERAGE, so this narrows safely.
+            (size, margin, value.try_into().expect(errors::VALUE_OVERFLOW))
+        } else {
+            // KIND_CLOSE_POSITION is handled before this call; anything else is unreachable
+            // because the registry rejects unknown kinds. Fail closed regardless.
+            core::panic_with_felt252(errors::UNKNOWN_KIND)
         }
     }
 

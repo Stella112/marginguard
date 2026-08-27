@@ -51,6 +51,32 @@ pub trait IAgentRegistry<T> {
         signature_r: felt252,
         signature_s: felt252,
     ) -> bool;
+
+    /// Binds the registry to the one executor allowed to consume proposals — the perp engine.
+    /// One-time, like the order book's venue binding: the engine's constructor takes the
+    /// registry, so they cannot both know each other at deployment. Done immediately after
+    /// deploy.
+    fn initialize_executor(ref self: T, executor: ContractAddress);
+
+    /// The mutating counterpart to `verify_proposal`: runs the identical checks and, on
+    /// success, **burns the nonce** so the proposal can never be replayed (threat T6). Reverts
+    /// with a specific error on any failed check, so the calling perp action aborts atomically.
+    ///
+    /// Restricted to the bound executor. This matters: the nonce burn and the position state
+    /// change must happen in one transaction, or a griefer could replay a signed proposal to
+    /// desync the nonce from the engine. Only the engine calls this, inside its own adjustment.
+    fn consume_proposal(
+        ref self: T,
+        agent: ContractAddress,
+        position_id: felt252,
+        kind: u8,
+        value: u128,
+        nonce: u64,
+        signature_r: felt252,
+        signature_s: felt252,
+    );
+
+    fn executor(self: @T) -> ContractAddress;
 }
 
 pub mod errors {
@@ -60,6 +86,14 @@ pub mod errors {
     pub const ZERO_MAX_LEVERAGE: felt252 = 'ZERO_MAX_LEVERAGE';
     pub const BPS_OUT_OF_RANGE: felt252 = 'BPS_OUT_OF_RANGE';
     pub const LEVERAGE_TOO_HIGH: felt252 = 'LEVERAGE_TOO_HIGH';
+    pub const ZERO_EXECUTOR: felt252 = 'ZERO_EXECUTOR';
+    pub const EXECUTOR_ALREADY_SET: felt252 = 'EXECUTOR_ALREADY_SET';
+    pub const NOT_EXECUTOR: felt252 = 'NOT_EXECUTOR';
+    // consume_proposal rejection reasons — specific so the engine's revert says why.
+    pub const AGENT_INACTIVE: felt252 = 'AGENT_INACTIVE';
+    pub const STALE_NONCE: felt252 = 'STALE_NONCE';
+    pub const SIG_INVALID: felt252 = 'SIG_INVALID';
+    pub const POLICY_VIOLATION: felt252 = 'POLICY_VIOLATION';
 }
 
 /// Basis-point denominator. A bound above this would allow more than a 100% move.
@@ -73,7 +107,10 @@ pub const MAX_SUPPORTED_LEVERAGE: u8 = 10;
 pub mod AgentRegistry {
     use core::ecdsa::check_ecdsa_signature;
     use core::num::traits::Zero;
-    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
     use starknet::{ContractAddress, get_caller_address};
     use crate::commitments::compute_proposal_digest;
     use crate::types::{
@@ -85,6 +122,8 @@ pub mod AgentRegistry {
     #[storage]
     struct Storage {
         agents: Map<ContractAddress, AgentEntry>,
+        /// The perp engine, the only address allowed to consume proposals.
+        executor: ContractAddress,
     }
 
     #[event]
@@ -190,6 +229,47 @@ pub mod AgentRegistry {
 
             // 4. Within policy bounds.
             within_policy(entry.policy, kind, value)
+        }
+
+        fn initialize_executor(ref self: ContractState, executor: ContractAddress) {
+            assert(executor.is_non_zero(), errors::ZERO_EXECUTOR);
+            assert(self.executor.read().is_zero(), errors::EXECUTOR_ALREADY_SET);
+            self.executor.write(executor);
+        }
+
+        fn consume_proposal(
+            ref self: ContractState,
+            agent: ContractAddress,
+            position_id: felt252,
+            kind: u8,
+            value: u128,
+            nonce: u64,
+            signature_r: felt252,
+            signature_s: felt252,
+        ) {
+            // Only the bound engine may consume — see the trait doc for why this must be gated.
+            let executor = self.executor.read();
+            assert(executor.is_non_zero() && get_caller_address() == executor, errors::NOT_EXECUTOR);
+
+            let entry = self.agents.read(agent);
+
+            // Same four checks as verify_proposal, but each asserts with a specific reason so
+            // the engine's transaction reverts legibly.
+            assert(entry.public_key.is_non_zero() && entry.active, errors::AGENT_INACTIVE);
+            assert(nonce == entry.nonce, errors::STALE_NONCE);
+            let digest = compute_proposal_digest(position_id, kind, value, nonce);
+            assert(
+                check_ecdsa_signature(digest, entry.public_key, signature_r, signature_s),
+                errors::SIG_INVALID,
+            );
+            assert(within_policy(entry.policy, kind, value), errors::POLICY_VIOLATION);
+
+            // Burn the nonce. A monotonic bump means this exact proposal can never verify again.
+            self.agents.write(agent, AgentEntry { nonce: entry.nonce + 1, ..entry });
+        }
+
+        fn executor(self: @ContractState) -> ContractAddress {
+            self.executor.read()
         }
     }
 

@@ -1,6 +1,33 @@
 # Verified addresses
 
-Everything here was checked against Starknet mainnet, not copied from documentation.
+Everything here was checked against the chain, not copied from documentation.
+
+## MarginGuard — Sepolia deployment (live)
+
+Deployed 2026-08-27 via `scripts/deploy/deploy_sjs.mjs` (starknet.js v10.4.0) and verified
+on-chain: all three classes present, `book.venue()` returns the venue, and
+`venue.privacy_pool()` returns the Sepolia pool.
+
+| Contract | Address |
+| --- | --- |
+| AgentRegistry | `0x03ed6b59a2eb92151f4bb1c86764b877851e193c0219b36ebbf4a4b2bfd5bdb8` |
+| OrderBook | `0x03a7be95529ca4c28271bd4b017d582a14f799dec47696495ce6e10b698e8bb0` |
+| MarginGuardVenue | `0x05c10c42f661b328c6f75a1acba641029b9080938c50922de1c79beacb2f8a4f` |
+| STRK20 pool (Sepolia) | `0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91` |
+
+Deployer account (single-signer OZ, no guardian):
+`0x03e7f18a3bc53ec2229a65fdff51659c16e1304e02f0b6db144353a222ace2d1`
+
+Wiring tx: `0x1a6298cbd6a912b754f76e0749972fabf951b6c3c98dc304d0977de63e5cff7`
+
+> **Deployment tooling note.** starkli 0.4.2 could not declare these: its compiled-class-hash
+> formula predates Starknet 0.14.3 (rejected with a class-hash mismatch), and its Sierra
+> compiler predates 1.8.0. starknet.js v10.4.0 computes the current hash (verified equal to the
+> network's) and declared cleanly. The starkli path and its workarounds are kept in
+> DEPLOYMENT.md for reference; `deploy_sjs.mjs` is the working path.
+
+## STRK20 privacy pool — mainnet
+
 Reproduce with `node scripts/discover_pool_address.mjs`.
 
 ## STRK20 privacy pool — mainnet

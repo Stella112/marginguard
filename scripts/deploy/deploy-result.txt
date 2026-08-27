@@ -1,0 +1,7 @@
+
+================ DEPLOYED (Sepolia) ================
+AgentRegistry    : 0x3ed6b59a2eb92151f4bb1c86764b877851e193c0219b36ebbf4a4b2bfd5bdb8
+OrderBook        : 0x3a7be95529ca4c28271bd4b017d582a14f799dec47696495ce6e10b698e8bb0
+MarginGuardVenue : 0x5c10c42f661b328c6f75a1acba641029b9080938c50922de1c79beacb2f8a4f
+privacy pool     : 0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91
+===================================================

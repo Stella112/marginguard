@@ -1,0 +1,9 @@
+
+============ DEPLOYED — FULL (Sepolia) ============
+AgentRegistry    : 0x64a7c3a09c040fa119990ce0a849e0451e134155389b4debd9fd535319aa487
+ManualOracle     : 0x7cb6c35ab8313f2ce9bbe3427504f72fa57288f1180c68af1416567f2673a14
+PerpEngine       : 0x579523cbadd6a1228f66ba0265fa86dacf8d2239c0c685ad236860da78a3c5
+OrderBook        : 0x71960e31d69f11e7a9342124d60b019bce57b8f848174c2a079b509c40aec61
+MarginGuardVenue : 0x4c5575b5342aca8a6bce5199e3bfeb70ace94670985dfc21b0120224a0b056e
+privacy pool     : 0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91
+==================================================

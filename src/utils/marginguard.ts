@@ -9,10 +9,13 @@ import { RpcProvider, hash, shortString, num } from "starknet";
 // ─── Sepolia deployment (live, verified on-chain 2026-08-27) ────────────────
 export const SEPOLIA_RPC = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_8";
 
+// Full-system deployment (spot + perps + agent + oracle), verified on-chain 2026-08-27.
 export const MG = {
-  agentRegistry: "0x03ed6b59a2eb92151f4bb1c86764b877851e193c0219b36ebbf4a4b2bfd5bdb8",
-  orderBook: "0x03a7be95529ca4c28271bd4b017d582a14f799dec47696495ce6e10b698e8bb0",
-  venue: "0x05c10c42f661b328c6f75a1acba641029b9080938c50922de1c79beacb2f8a4f",
+  agentRegistry: "0x064a7c3a09c040fa119990ce0a849e0451e134155389b4debd9fd535319aa487",
+  oracle: "0x07cb6c35ab8313f2ce9bbe3427504f72fa57288f1180c68af1416567f2673a14",
+  perpEngine: "0x00579523cbadd6a1228f66ba0265fa86dacf8d2239c0c685ad236860da78a3c5",
+  orderBook: "0x071960e31d69f11e7a9342124d60b019bce57b8f848174c2a079b509c40aec61",
+  venue: "0x04c5575b5342aca8a6bce5199e3bfeb70ace94670985dfc21b0120224a0b056e",
   pool: "0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91",
 } as const;
 

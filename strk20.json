@@ -1,12 +1,34 @@
 {
-  "transactions": [
-    "0x1d6dc36e95456923d773b7d2f381ea7557ecdbbdf5a8b1807113c5d80646ba4",
-    "0x4e9bdb6368afb6ae8613e994361acb7737cf48ef0fe6dd1525cc30f0c6820a3",
-    "0x7f96fbdf92b465b97286f95dc9c2553d2af557ca8e3b2cbe67acb3acf211f51"
-  ],
-  "contracts": [
-    "0x78ae662e0cc6d1ab2cfeaf2a51ba8783d88e31886f88a794d142f95a6f8735b"
-  ],
+  "project": "MarginGuard",
+  "tagline": "Private dark pool & perpetuals on Starknet, with agent-verified risk management",
+  "ideas": ["IDEA-07", "IDEA-08", "IDEA-21", "IDEA-02 (motivation)"],
+  "networks": {
+    "sepolia": {
+      "rpc": "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_8",
+      "strk20_pool": "0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91",
+      "contracts": {
+        "AgentRegistry": "0x064a7c3a09c040fa119990ce0a849e0451e134155389b4debd9fd535319aa487",
+        "ManualOracle": "0x07cb6c35ab8313f2ce9bbe3427504f72fa57288f1180c68af1416567f2673a14",
+        "PerpEngine": "0x00579523cbadd6a1228f66ba0265fa86dacf8d2239c0c685ad236860da78a3c5",
+        "OrderBook": "0x071960e31d69f11e7a9342124d60b019bce57b8f848174c2a079b509c40aec61",
+        "MarginGuardVenue": "0x04c5575b5342aca8a6bce5199e3bfeb70ace94670985dfc21b0120224a0b056e"
+      },
+      "wiring_transactions": [
+        "0x5ca89008343f3bebd1484095a3d8f02dc0c91012b0aa75999c4202da954270f",
+        "0x6c346316a02f6c3957241278c2bcfe847deb0acc6938ebdbf3b42d5852cedab",
+        "0x6c6e01c8a075fc3479784e70caaeba298865c4757fd13416b473e759496b887"
+      ]
+    },
+    "mainnet": {
+      "strk20_pool": "0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",
+      "note": "Pool address established from chain (see docs/ADDRESSES.md). Full-system mainnet deploy uses the same scripts/deploy/deploy_full_sjs.mjs with the mainnet RPC + pool.",
+      "verified_private_invoke_transactions": [
+        "0x1d6dc36e95456923d773b7d2f381ea7557ecdbbdf5a8b1807113c5d80646ba4",
+        "0x4e9bdb6368afb6ae8613e994361acb7737cf48ef0fe6dd1525cc30f0c6820a3",
+        "0x7f96fbdf92b465b97286f95dc9c2553d2af557ca8e3b2cbe67acb3acf211f51"
+      ]
+    }
+  },
   "demo_video": "",
   "demo_url": ""
 }

@@ -2,23 +2,33 @@
 
 Everything here was checked against the chain, not copied from documentation.
 
-## MarginGuard — Sepolia deployment (live)
+## MarginGuard — Sepolia deployment (FULL system, live)
 
-Deployed 2026-08-27 via `scripts/deploy/deploy_sjs.mjs` (starknet.js v10.4.0) and verified
-on-chain: all three classes present, `book.venue()` returns the venue, and
-`venue.privacy_pool()` returns the Sepolia pool.
+Deployed 2026-08-27 via `scripts/deploy/deploy_full_sjs.mjs` (starknet.js v10.4.0). All five
+classes present, and every binding verified on-chain: `book.venue()`, `registry.executor()`,
+`perp.agent_registry()`, `perp.oracle()`, and `venue.privacy_pool()` all resolve correctly.
 
 | Contract | Address |
 | --- | --- |
-| AgentRegistry | `0x03ed6b59a2eb92151f4bb1c86764b877851e193c0219b36ebbf4a4b2bfd5bdb8` |
-| OrderBook | `0x03a7be95529ca4c28271bd4b017d582a14f799dec47696495ce6e10b698e8bb0` |
-| MarginGuardVenue | `0x05c10c42f661b328c6f75a1acba641029b9080938c50922de1c79beacb2f8a4f` |
+| AgentRegistry | `0x064a7c3a09c040fa119990ce0a849e0451e134155389b4debd9fd535319aa487` |
+| ManualOracle (Ekubo-TWAP stand-in) | `0x07cb6c35ab8313f2ce9bbe3427504f72fa57288f1180c68af1416567f2673a14` |
+| PerpEngine | `0x00579523cbadd6a1228f66ba0265fa86dacf8d2239c0c685ad236860da78a3c5` |
+| OrderBook | `0x071960e31d69f11e7a9342124d60b019bce57b8f848174c2a079b509c40aec61` |
+| MarginGuardVenue | `0x04c5575b5342aca8a6bce5199e3bfeb70ace94670985dfc21b0120224a0b056e` |
 | STRK20 pool (Sepolia) | `0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91` |
 
 Deployer account (single-signer OZ, no guardian):
 `0x03e7f18a3bc53ec2229a65fdff51659c16e1304e02f0b6db144353a222ace2d1`
 
-Wiring tx: `0x1a6298cbd6a912b754f76e0749972fabf951b6c3c98dc304d0977de63e5cff7`
+Wiring txs: book→venue `0x5ca89008343f3bebd1484095a3d8f02dc0c91012b0aa75999c4202da954270f`,
+registry→executor `0x6c346316a02f6c3957241278c2bcfe847deb0acc6938ebdbf3b42d5852cedab`,
+perp→registry `0x6c6e01c8a075fc3479784e70caaeba298865c4757fd13416b473e759496b887`.
+
+### Superseded first deployment (spot-only, still live)
+
+The initial spot-only deploy (before the viewing-key grant) remains on-chain but is superseded by
+the full system above: AgentRegistry `0x03ed6b59…bdb8`, OrderBook `0x03a7be95…8bb0`,
+MarginGuardVenue `0x05c10c42…8a4f`.
 
 > **Deployment tooling note.** starkli 0.4.2 could not declare these: its compiled-class-hash
 > formula predates Starknet 0.14.3 (rejected with a class-hash mismatch), and its Sierra

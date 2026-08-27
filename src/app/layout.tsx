@@ -17,8 +17,8 @@ const spaceMono = Space_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Shielded STRK · WalletAccountV6',
-  description: 'Shield, unshield and privately move STRK on Starknet with WalletAccountV6',
+  title: 'MarginGuard · Private Dark Pool & Perps on STRK20',
+  description: 'A private spot dark pool and perpetuals venue on Starknet, built on STRK20 shielded notes, with agent-verified risk management.',
 }
 
 export default function RootLayout({

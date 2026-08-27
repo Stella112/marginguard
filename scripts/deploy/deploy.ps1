@@ -1,94 +1,120 @@
-# MarginGuard deployment — declare, deploy, and wire the three contracts.
+# MarginGuard deployment - declare, deploy, and wire the spot-venue contracts.
 #
-# This is a thin, auditable wrapper over starkli. It declares each class, deploys OrderBook
-# and MarginGuardVenue, then calls OrderBook.initialize_venue so the book will accept the
-# venue. AgentRegistry is standalone and takes no constructor args.
+# Scope: AgentRegistry, OrderBook, MarginGuardVenue - the spot dark pool plus the agent
+# registry. The perp engine needs a price oracle (the Ekubo TWAP adapter, still to be built),
+# so it deploys in a later pass; this script proves the declare/deploy/wire pipeline and puts
+# the spot venue live.
 #
-# It never sees or asks for a private key. You point starkli at your own account and keystore
-# via the two environment variables below; starkli reads the key from your encrypted keystore
-# and prompts you for its password at signing time.
+# It never sees a private key. starkli signs from the encrypted keystore your env vars point at
+# and prompts *you* for the keystore password at each signature.
 #
-# Prerequisites (done once, by you — see docs/DEPLOYMENT.md):
-#   - starkli on PATH (installed at C:\Users\Admin\tools\starkli\starkli.exe)
-#   - an account descriptor JSON and an encrypted keystore JSON for a funded account
-#   - $env:STARKNET_RPC set to a working RPC for the target network
+# PowerShell 5.1 note: starkli writes progress to stderr. This script does NOT merge stderr into
+# stdout (no `2>&1`) and runs with ErrorActionPreference=Continue, so that normal progress is not
+# mistaken for a fatal error. Real failures are caught via $LASTEXITCODE.
 #
-# Usage:
-#   $env:STARKNET_ACCOUNT = "C:\path\to\account.json"
-#   $env:STARKNET_KEYSTORE = "C:\path\to\keystore.json"
-#   $env:STARKNET_RPC = "https://free-rpc.nethermind.io/sepolia-juno/"
-#   # POOL is the STRK20 privacy pool for the target network:
-#   #   Sepolia: 0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91
-#   #   Mainnet: 0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a
-#   powershell -File scripts\deploy\deploy.ps1 -Pool 0x0254a6b2...
+# Prerequisites (see docs/DEPLOYMENT.md), then:
+#   $env:STARKNET_ACCOUNT  = "C:\Users\Admin\.starkli\account.json"
+#   $env:STARKNET_KEYSTORE = "C:\Users\Admin\.starkli\keystore.json"
+#   $env:STARKNET_RPC      = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_8"
+#   powershell -File C:\stark\scripts\deploy\deploy.ps1 -Pool 0x0254a6b2...
+#
+# Tip: to avoid retyping the keystore password on every transaction (TESTNET only), also set
+#   $env:STARKNET_KEYSTORE_PASSWORD = "yourpassword"
 
 param(
     [Parameter(Mandatory = $true)][string]$Pool
 )
 
-$ErrorActionPreference = "Stop"
+# Continue, not Stop: starkli's stderr progress must not abort the script.
+$ErrorActionPreference = "Continue"
+
 $starkli = "C:\Users\Admin\tools\starkli\starkli.exe"
 $dev = Join-Path $PSScriptRoot "..\..\contracts\target\dev"
+$resultFile = Join-Path $PSScriptRoot "deploy-result.txt"
 
-function Require-Env($name) {
-    $val = [Environment]::GetEnvironmentVariable($name)
-    if ([string]::IsNullOrWhiteSpace($val)) { throw "Set `$env:$name before running." }
-    return $val
+function Fail($msg) {
+    Write-Host "ERROR: $msg" -ForegroundColor Red
+    exit 1
 }
 
-$account = Require-Env "STARKNET_ACCOUNT"
-$keystore = Require-Env "STARKNET_KEYSTORE"
-$rpc = Require-Env "STARKNET_RPC"
+foreach ($v in @("STARKNET_ACCOUNT", "STARKNET_KEYSTORE", "STARKNET_RPC")) {
+    if (-not (Test-Path "Env:$v")) { Fail "Set `$env:$v before running (see docs/DEPLOYMENT.md)." }
+}
 
-Write-Host "RPC     : $rpc"
-Write-Host "account : $account"
-Write-Host "pool    : $Pool"
-Write-Host ""
+Write-Host "RPC     : $env:STARKNET_RPC"
+Write-Host "account : $env:STARKNET_ACCOUNT"
+Write-Host "pool    : $Pool`n"
 
-# starkli reads account + keystore from these; --watch blocks until the tx is accepted.
-$common = @("--account", $account, "--keystore", $keystore, "--rpc", $rpc, "--watch")
-
-function Declare($name) {
+# Deterministic declaration class hash, computed locally (clean stdout, no network).
+function Get-ClassHash($name) {
     $sierra = Join-Path $dev "marginguard_$name.contract_class.json"
-    if (-not (Test-Path $sierra)) { throw "missing artifact: $sierra (run 'scarb build' first)" }
-    Write-Host "==> declaring $name"
-    # Declaring an already-declared class is a no-op that still prints the class hash.
-    $out = & $starkli declare $sierra @common 2>&1
-    $out | Write-Host
-    $hash = ($out | Select-String -Pattern "0x[0-9a-fA-F]{60,64}" | Select-Object -Last 1).Matches.Value
-    if (-not $hash) { throw "could not parse class hash for $name" }
-    Write-Host "    class hash: $hash`n"
-    return $hash
+    if (-not (Test-Path $sierra)) { Fail "missing artifact: $sierra (run 'scarb build')" }
+    $h = & $starkli class-hash $sierra
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($h)) { Fail "class-hash failed for $name" }
+    return $h.Trim()
 }
 
-function Deploy($name, $classHash, [string[]]$ctorArgs) {
-    Write-Host "==> deploying $name"
-    $out = & $starkli deploy $classHash @ctorArgs @common 2>&1
-    $out | Write-Host
-    $addr = ($out | Select-String -Pattern "0x[0-9a-fA-F]{60,64}" | Select-Object -Last 1).Matches.Value
-    if (-not $addr) { throw "could not parse deployed address for $name" }
-    Write-Host "    address: $addr`n"
+# Declare a class. Idempotent: an already-declared class exits 0 with a note. A real failure
+# (bad account, no funds) is a nonzero exit we surface.
+function Invoke-Declare($name) {
+    $sierra = Join-Path $dev "marginguard_$name.contract_class.json"
+    Write-Host "==> declaring $name" -ForegroundColor Cyan
+    & $starkli declare $sierra --watch
+    if ($LASTEXITCODE -ne 0) {
+        Fail "declare $name failed (exit $LASTEXITCODE). If it says 'already declared', that is fine - re-run and it will skip."
+    }
+    Write-Host ""
+}
+
+# Deploy a class and return the deployed address. starkli prints the address as the final
+# stdout line; progress goes to stderr (shown on console, not captured here).
+function Invoke-Deploy($name, $classHash, [string[]]$ctorArgs) {
+    Write-Host "==> deploying $name" -ForegroundColor Cyan
+    $out = & $starkli deploy $classHash @ctorArgs --watch
+    if ($LASTEXITCODE -ne 0) { Fail "deploy $name failed (exit $LASTEXITCODE)" }
+    # The deployed address is the last 0x... token in stdout.
+    $addr = ($out | Select-String -Pattern '0x[0-9a-fA-F]{1,64}' -AllMatches |
+        ForEach-Object { $_.Matches } | Select-Object -Last 1).Value
+    if ([string]::IsNullOrWhiteSpace($addr)) { Fail "could not read deployed address for $name from starkli output" }
+    Write-Host "    $name : $addr`n"
     return $addr
 }
 
-$registryClass = Declare "AgentRegistry"
-$bookClass     = Declare "OrderBook"
-$venueClass    = Declare "MarginGuardVenue"
+# Class hashes (local, deterministic).
+$registryClass = Get-ClassHash "AgentRegistry"
+$bookClass = Get-ClassHash "OrderBook"
+$venueClass = Get-ClassHash "MarginGuardVenue"
+Write-Host "class hashes:"
+Write-Host "  AgentRegistry    : $registryClass"
+Write-Host "  OrderBook        : $bookClass"
+Write-Host "  MarginGuardVenue : $venueClass`n"
 
-$registryAddr = Deploy "AgentRegistry" $registryClass @()
-$bookAddr      = Deploy "OrderBook" $bookClass @()
+# Declare.
+Invoke-Declare "AgentRegistry"
+Invoke-Declare "OrderBook"
+Invoke-Declare "MarginGuardVenue"
+
+# Deploy.
+$registryAddr = Invoke-Deploy "AgentRegistry" $registryClass @()
+$bookAddr = Invoke-Deploy "OrderBook" $bookClass @()
 # Venue constructor: (privacy_pool, order_book)
-$venueAddr     = Deploy "MarginGuardVenue" $venueClass @($Pool, $bookAddr)
+$venueAddr = Invoke-Deploy "MarginGuardVenue" $venueClass @($Pool, $bookAddr)
 
-Write-Host "==> wiring OrderBook.initialize_venue($venueAddr)"
-& $starkli invoke $bookAddr initialize_venue $venueAddr @common | Write-Host
+# Wire the book to the venue so it will accept placements.
+Write-Host "==> OrderBook.initialize_venue($venueAddr)" -ForegroundColor Cyan
+& $starkli invoke $bookAddr initialize_venue $venueAddr --watch
+if ($LASTEXITCODE -ne 0) { Fail "initialize_venue failed (exit $LASTEXITCODE)" }
 
-Write-Host ""
-Write-Host "================ DEPLOYED ================"
-Write-Host "AgentRegistry    : $registryAddr"
-Write-Host "OrderBook        : $bookAddr"
-Write-Host "MarginGuardVenue : $venueAddr"
-Write-Host "privacy pool     : $Pool"
-Write-Host "========================================="
-Write-Host ""
-Write-Host "Record these in docs/ADDRESSES.md and strk20.json."
+$lines = @(
+    "",
+    "================ DEPLOYED (Sepolia) ================",
+    "AgentRegistry    : $registryAddr",
+    "OrderBook        : $bookAddr",
+    "MarginGuardVenue : $venueAddr",
+    "privacy pool     : $Pool",
+    "==================================================="
+)
+foreach ($line in $lines) { Write-Host $line -ForegroundColor Green }
+$lines | Out-File -Encoding utf8 $resultFile
+Write-Host "Saved to $resultFile"
+Write-Host "Paste the DEPLOYED block back to Claude to record it."

@@ -28,6 +28,16 @@ pub trait IAgentRegistry<T> {
     /// The agent's registered public key, or 0 if never registered.
     fn agent_public_key(self: @T, agent: ContractAddress) -> felt252;
 
+    /// Sets the caller agent's **viewing** public key — the STARK-curve point owners
+    /// ECDH-encrypt a position's viewing capability to when they grant this agent visibility.
+    /// Separate from the signing key: signing authorises proposals, viewing decrypts positions.
+    /// This is the agent's half of the app-level selective-disclosure grant (IDEA-21); the
+    /// encryption itself happens off-chain, using STRK20's documented ECDH scheme.
+    fn set_agent_viewing_key(ref self: T, viewing_key: felt252);
+
+    /// The agent's registered viewing public key, or 0 if none set.
+    fn agent_viewing_key(self: @T, agent: ContractAddress) -> felt252;
+
     /// The agent's policy bounds. All-zero if never registered.
     fn agent_policy(self: @T, agent: ContractAddress) -> AgentPolicy;
 
@@ -124,6 +134,8 @@ pub mod AgentRegistry {
         agents: Map<ContractAddress, AgentEntry>,
         /// The perp engine, the only address allowed to consume proposals.
         executor: ContractAddress,
+        /// Agent viewing public keys, for the owner->agent selective-disclosure grant.
+        viewing_keys: Map<ContractAddress, felt252>,
     }
 
     #[event]
@@ -189,6 +201,17 @@ pub mod AgentRegistry {
 
         fn agent_public_key(self: @ContractState, agent: ContractAddress) -> felt252 {
             self.agents.read(agent).public_key
+        }
+
+        fn set_agent_viewing_key(ref self: ContractState, viewing_key: felt252) {
+            let agent = get_caller_address();
+            // Only a registered agent can advertise a viewing key.
+            assert(self.agents.read(agent).public_key.is_non_zero(), errors::NOT_REGISTERED);
+            self.viewing_keys.write(agent, viewing_key);
+        }
+
+        fn agent_viewing_key(self: @ContractState, agent: ContractAddress) -> felt252 {
+            self.viewing_keys.read(agent)
         }
 
         fn agent_policy(self: @ContractState, agent: ContractAddress) -> AgentPolicy {

@@ -122,3 +122,22 @@ pub struct PositionEntry {
     /// True if the position was closed by liquidation rather than by its owner.
     pub liquidated: bool,
 }
+
+/// A scoped viewing grant from a position owner to a risk agent.
+///
+/// The chain records only the ECDH grant material — the ephemeral public key and the masked
+/// viewing capability — plus which agent and whether it is still active. The underlying
+/// position values are never here: the agent recovers them off-chain by decrypting with its
+/// viewing key. This mirrors how STRK20 stores channel and auditor blobs on-chain and decrypts
+/// off-chain. See ARCHITECTURE_REPORT §1.5.1.
+#[derive(Serde, Copy, Drop, PartialEq, Debug, starknet::Store)]
+pub struct ViewGrant {
+    /// The agent granted scoped view of this position.
+    pub agent: starknet::ContractAddress,
+    /// Ephemeral public key `rG` published by the owner for ECDH.
+    pub ephemeral: felt252,
+    /// The masked viewing capability, `h(GRANT_TAG, shared.x) + capability`.
+    pub ciphertext: felt252,
+    /// True once granted, false once the owner revokes.
+    pub active: bool,
+}

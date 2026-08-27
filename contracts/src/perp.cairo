@@ -31,7 +31,7 @@
 //! that path is integration work (Phase 5); the engine is what it targets.
 
 use starknet::ContractAddress;
-use crate::types::PositionEntry;
+use crate::types::{PositionEntry, ViewGrant};
 
 #[starknet::interface]
 pub trait IPerpEngine<T> {
@@ -132,6 +132,32 @@ pub trait IPerpEngine<T> {
         new_salt: felt252,
     );
 
+    /// Grants a registered agent scoped viewing access to a position (owner-authorised).
+    ///
+    /// Records the ECDH grant material — the ephemeral public key and the masked capability —
+    /// so the agent can decrypt the position off-chain and compute health. The values
+    /// themselves are never stored. Requires the `owner_secret` preimage, so only the owner can
+    /// grant. Typically called in the same transaction as `open_position` (a multicall).
+    ///
+    /// This is the app-level selective-disclosure grant (IDEA-21) built on STRK20's ECDH
+    /// primitive; the encryption happens off-chain in the owner's wallet.
+    fn grant_view(
+        ref self: T,
+        position_id: felt252,
+        owner_secret: felt252,
+        agent: ContractAddress,
+        ephemeral: felt252,
+        ciphertext: felt252,
+    );
+
+    /// Revokes the agent's viewing grant on a position. Owner-only. The agent keeps whatever it
+    /// already decrypted, but receives no fresh grant material and the on-chain grant reads
+    /// inactive — the honest bound on what revocation can achieve.
+    fn revoke_view(ref self: T, position_id: felt252, owner_secret: felt252);
+
+    /// The current viewing grant for a position (agent, ephemeral, ciphertext, active).
+    fn get_view_grant(self: @T, position_id: felt252) -> ViewGrant;
+
     fn get_position(self: @T, position_id: felt252) -> PositionEntry;
     fn is_open(self: @T, position_id: felt252) -> bool;
     /// (settlement_token, settlement_amount) recorded once a position closes or liquidates.
@@ -163,6 +189,8 @@ pub mod errors {
     pub const REGISTRY_NOT_SET: felt252 = 'REGISTRY_NOT_SET';
     pub const ADJUST_TO_ZERO_SIZE: felt252 = 'ADJUST_TO_ZERO_SIZE';
     pub const UNKNOWN_KIND: felt252 = 'UNKNOWN_KIND';
+    pub const ZERO_AGENT: felt252 = 'ZERO_AGENT';
+    pub const NO_GRANT: felt252 = 'NO_GRANT';
 }
 
 /// Maintenance margin as a fraction of posted margin. The brief fixes it at 50%.
@@ -185,7 +213,7 @@ pub mod PerpEngine {
     use crate::oracle::{IPriceOracleDispatcher, IPriceOracleDispatcherTrait};
     use crate::types::{
         KIND_ADJUST_LEVERAGE, KIND_CLOSE_POSITION, KIND_INCREASE_MARGIN, KIND_REDUCE_SIZE,
-        PositionEntry, SIDE_BUY, SIDE_SELL,
+        PositionEntry, SIDE_BUY, SIDE_SELL, ViewGrant,
     };
     use super::{
         BPS_DENOMINATOR, IPerpEngine, MAINTENANCE_BPS, MAX_LEVERAGE, errors,
@@ -201,6 +229,7 @@ pub mod PerpEngine {
         positions: Map<felt252, PositionEntry>,
         settlement_token: Map<felt252, ContractAddress>,
         settlement_amount: Map<felt252, u128>,
+        view_grants: Map<felt252, ViewGrant>,
     }
 
     #[event]
@@ -210,6 +239,24 @@ pub mod PerpEngine {
         PositionClosed: PositionClosed,
         PositionLiquidated: PositionLiquidated,
         PositionAdjusted: PositionAdjusted,
+        ViewGranted: ViewGranted,
+        ViewRevoked: ViewRevoked,
+    }
+
+    /// That a grant exists and to which agent is public; the grant material and the position
+    /// values are not carried in the event.
+    #[derive(Drop, starknet::Event)]
+    pub struct ViewGranted {
+        #[key]
+        pub position_id: felt252,
+        #[key]
+        pub agent: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ViewRevoked {
+        #[key]
+        pub position_id: felt252,
     }
 
     /// Agent identity and the action type are public by design; the position's economics are
@@ -433,6 +480,48 @@ pub mod PerpEngine {
             );
             let price = self.price_of(entry);
             is_breached(side, size, entry_price, margin, price)
+        }
+
+        fn grant_view(
+            ref self: ContractState,
+            position_id: felt252,
+            owner_secret: felt252,
+            agent: ContractAddress,
+            ephemeral: felt252,
+            ciphertext: felt252,
+        ) {
+            let entry = self.positions.read(position_id);
+            assert(entry.commitment.is_non_zero(), errors::POSITION_NOT_FOUND);
+            assert(entry.open, errors::NOT_OPEN);
+            assert(agent.is_non_zero(), errors::ZERO_AGENT);
+            // Owner-only: entitlement is the secret, as everywhere else.
+            assert(
+                compute_trader_commitment(owner_secret) == entry.trader_commitment,
+                errors::BAD_OWNER_SECRET,
+            );
+
+            self
+                .view_grants
+                .write(position_id, ViewGrant { agent, ephemeral, ciphertext, active: true });
+            self.emit(ViewGranted { position_id, agent });
+        }
+
+        fn revoke_view(ref self: ContractState, position_id: felt252, owner_secret: felt252) {
+            let entry = self.positions.read(position_id);
+            assert(entry.commitment.is_non_zero(), errors::POSITION_NOT_FOUND);
+            let grant = self.view_grants.read(position_id);
+            assert(grant.agent.is_non_zero(), errors::NO_GRANT);
+            assert(
+                compute_trader_commitment(owner_secret) == entry.trader_commitment,
+                errors::BAD_OWNER_SECRET,
+            );
+
+            self.view_grants.write(position_id, ViewGrant { active: false, ..grant });
+            self.emit(ViewRevoked { position_id });
+        }
+
+        fn get_view_grant(self: @ContractState, position_id: felt252) -> ViewGrant {
+            self.view_grants.read(position_id)
         }
 
         fn get_position(self: @ContractState, position_id: felt252) -> PositionEntry {

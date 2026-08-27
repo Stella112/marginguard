@@ -7,3 +7,4 @@ mod test_order_book;
 mod test_venue;
 mod test_perp;
 mod test_agent_risk;
+mod test_view_grant;

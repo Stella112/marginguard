@@ -239,3 +239,34 @@ export async function readAgentViewingKey(agent: string): Promise<string> {
   const [vk] = await call(MG.agentRegistry, "agent_viewing_key", [agent]);
   return vk;
 }
+
+/** Live mark price from the deployed oracle (scaled 1e18 → number). */
+export async function readMarkPrice(): Promise<number> {
+  // get_price(base, quote); ManualOracle ignores the args and returns the set price.
+  const r = await call(MG.oracle, "get_price", [MG.pool, MG.pool]);
+  return Number(BigInt(r[0])) / 1e18;
+}
+
+export type PositionView = {
+  exists: boolean;
+  open: boolean;
+  liquidated: boolean;
+  baseToken: string;
+  quoteToken: string;
+  commitment: string;
+};
+
+/** Reads a perp position's public state by id. */
+export async function readPosition(positionId: string): Promise<PositionView> {
+  // get_position returns PositionEntry { trader_commitment, commitment, base, quote, open, liquidated }
+  const r = await call(MG.perpEngine, "get_position", [positionId]);
+  const commitment = r[1];
+  return {
+    exists: BigInt(commitment) !== 0n,
+    open: BigInt(r[4]) === 1n,
+    liquidated: BigInt(r[5]) === 1n,
+    baseToken: r[2],
+    quoteToken: r[3],
+    commitment,
+  };
+}

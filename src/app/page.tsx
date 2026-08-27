@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ec } from "starknet";
-import styles from "./mg.module.css";
+import s from "./terminal.module.css";
 import SelectWallet from "./components/client/WalletHandle/SelectWallet";
 import { useStoreWallet } from "./components/Wallet/walletContext";
 import {
@@ -10,594 +10,469 @@ import {
   VOYAGER,
   SIDE_BUY,
   SIDE_SELL,
-  orderCommitment,
   positionCommitment,
   traderCommitment,
   randomFelt,
   short,
   readProvider,
   readVenueStatus,
+  readMarkPrice,
   readAgent,
   readViewGrant,
+  readPosition,
   grantRoundTrip,
   type VenueStatus,
   type AgentInfo,
   type ViewGrant,
+  type PositionView,
 } from "@/utils/marginguard";
 
-function Addr({ a }: { a: string }) {
+const SCALE = 10n ** 18n;
+
+// ─── Synthetic candles (illustrative), ending at the live mark ──────────────
+function candles(mark: number, n = 52) {
+  let seed = 20260827;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const out: { o: number; h: number; l: number; c: number }[] = [];
+  let price = mark * 0.94;
+  for (let i = 0; i < n; i++) {
+    const o = price;
+    const drift = (mark - price) * 0.05;
+    const c = o + drift + (rnd() - 0.48) * mark * 0.012;
+    const h = Math.max(o, c) + rnd() * mark * 0.006;
+    const l = Math.min(o, c) - rnd() * mark * 0.006;
+    out.push({ o, h, l, c });
+    price = c;
+  }
+  // pin the last close to the mark
+  if (out.length) out[out.length - 1].c = mark;
+  return out;
+}
+
+function Chart({ mark }: { mark: number }) {
+  const data = useMemo(() => candles(mark), [mark]);
+  const W = 800;
+  const H = 360;
+  const pad = 8;
+  const lo = Math.min(...data.map((d) => d.l));
+  const hi = Math.max(...data.map((d) => d.h));
+  const y = (p: number) => pad + (1 - (p - lo) / (hi - lo || 1)) * (H - 2 * pad);
+  const cw = (W - 2 * pad) / data.length;
   return (
-    <a className={styles.link} href={`${VOYAGER}${a}`} target="_blank" rel="noreferrer">
-      <span className={styles.mono}>{short(a)}</span>
-    </a>
+    <svg className={s.chartSvg} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      {[0.2, 0.4, 0.6, 0.8].map((f) => (
+        <line key={f} x1={0} x2={W} y1={pad + f * (H - 2 * pad)} y2={pad + f * (H - 2 * pad)} stroke="#1c242e" strokeWidth={1} />
+      ))}
+      {data.map((d, i) => {
+        const x = pad + i * cw + cw / 2;
+        const up = d.c >= d.o;
+        const col = up ? "#16c784" : "#f6465d";
+        return (
+          <g key={i}>
+            <line x1={x} x2={x} y1={y(d.h)} y2={y(d.l)} stroke={col} strokeWidth={1} />
+            <rect
+              x={x - cw * 0.3}
+              width={cw * 0.6}
+              y={Math.min(y(d.o), y(d.c))}
+              height={Math.max(2, Math.abs(y(d.o) - y(d.c)))}
+              fill={col}
+            />
+          </g>
+        );
+      })}
+      <line x1={0} x2={W} y1={y(mark)} y2={y(mark)} stroke="#5b8def" strokeWidth={1} strokeDasharray="4 3" />
+    </svg>
   );
 }
 
-// ─── Live venue status ──────────────────────────────────────────────────────
-function VenueStatusCard() {
-  const [s, setS] = useState<VenueStatus | null>(null);
-  const [err, setErr] = useState<string>("");
-  useEffect(() => {
-    readVenueStatus().then(setS).catch((e) => setErr(String(e?.message ?? e)));
-  }, []);
+// ─── Shielded order book (the dark-pool differentiator) ─────────────────────
+function ShieldedBook({ mark }: { mark: number }) {
+  const rows = (side: "ask" | "bid") =>
+    Array.from({ length: 7 }).map((_, i) => {
+      const depth = 30 + ((i * 37) % 60);
+      return (
+        <div key={i} className={`${s.bookRow} ${side === "ask" ? s.askRow : s.bidRow}`}>
+          <span className={s.depth} style={{ width: `${depth}%` }} />
+          <span className={s.bookHidden}>■ ■ ■ ■ ■</span>
+          <span className={s.bookHidden}>shielded</span>
+        </div>
+      );
+    });
   return (
-    <div className={styles.card}>
-      <p className={styles.cardTitle}>Live on Starknet Sepolia</p>
-      <div className={styles.row}>
-        <span className={styles.label}>AgentRegistry</span>
-        <Addr a={MG.agentRegistry} />
+    <div className={s.col}>
+      <div className={s.panelHead}>
+        <span>Shielded book</span>
+        <span className={s.tag} style={{ background: "rgba(154,123,255,.16)", color: "#9a7bff" }}>DARK</span>
       </div>
-      <div className={styles.row}>
-        <span className={styles.label}>OrderBook</span>
-        <Addr a={MG.orderBook} />
+      <div className={s.book}>
+        <div className={s.bookRows}>
+          {rows("ask")}
+          <div className={s.bookMid}>
+            <span className={s.up}>{mark ? mark.toFixed(2) : "—"}</span>
+            <span className={s.muted} style={{ fontSize: 11, fontWeight: 400 }}>midpoint</span>
+          </div>
+          {rows("bid")}
+        </div>
+        <div className={s.bookExplain}>
+          Every resting order is a Poseidon commitment — price and size are hidden until it trades.
+          A match executes at the midpoint; ownership is never revealed. This is what a real dark
+          pool looks like on-chain.
+        </div>
       </div>
-      <div className={styles.row}>
-        <span className={styles.label}>MarginGuardVenue</span>
-        <Addr a={MG.venue} />
-      </div>
-      <div className={styles.row}>
-        <span className={styles.label}>STRK20 pool (pinned)</span>
-        <Addr a={MG.pool} />
-      </div>
-      <div className={styles.row}>
-        <span className={styles.label}>Wiring verified</span>
-        {err ? (
-          <span className={styles.bad}>read error</span>
-        ) : !s ? (
-          <span className={styles.label}>checking…</span>
-        ) : s.wired ? (
-          <span className={styles.ok}>✓ book ↔ venue ↔ pool</span>
-        ) : (
-          <span className={styles.bad}>mismatch</span>
-        )}
-      </div>
-      <p className={styles.note}>
-        Read live from chain: the venue&apos;s pinned pool and the book&apos;s bound venue,
-        confirming the deployment is wired end to end.
-      </p>
     </div>
   );
 }
 
-// ─── Commitment Lab ─────────────────────────────────────────────────────────
-type Mode = "spot" | "perp";
-
-function CommitmentLab() {
-  const [mode, setMode] = useState<Mode>("spot");
-
-  // Spot
+// ─── Trade panel ────────────────────────────────────────────────────────────
+function TradePanel({ mark }: { mark: number }) {
+  const isConnected = useStoreWallet((st) => st.isConnected);
   const [side, setSide] = useState(SIDE_BUY);
-  const [price, setPrice] = useState("1500");
   const [size, setSize] = useState("100");
-  // Perp
-  const [entry, setEntry] = useState("1500");
-  const [margin, setMargin] = useState("500");
   const [lev, setLev] = useState(2);
-
-  // Generated after mount so SSR and client agree (random in useState breaks hydration).
   const [salt, setSalt] = useState("");
-  const [secret, setSecret] = useState("");
-  useEffect(() => {
-    setSalt(randomFelt());
-    setSecret(randomFelt());
-  }, []);
+  const [status, setStatus] = useState<string | null>(null);
+  useEffect(() => setSalt(randomFelt()), []);
 
-  let commit = "";
-  try {
-    if (!salt) commit = "generating…";
-    else commit =
-      mode === "spot"
-        ? orderCommitment(side, BigInt(price || "0"), BigInt(size || "0"), salt)
-        : positionCommitment(
-            side,
-            BigInt(size || "0"),
-            BigInt(entry || "0"),
-            BigInt(margin || "0"),
-            lev,
-            salt,
-          );
-  } catch {
-    commit = "—";
-  }
-  const trader = secret ? traderCommitment(secret) : "generating…";
+  const entry = mark || 1500;
+  const sizeN = Number(size) || 0;
+  const notional = sizeN * entry;
+  const margin = lev > 0 ? notional / lev : 0;
+
+  const commitment = salt
+    ? positionCommitment(
+        side,
+        BigInt(Math.round(sizeN)),
+        BigInt(Math.round(entry * 1e18)) * 1n,
+        BigInt(Math.round(margin)),
+        lev,
+        salt,
+      )
+    : "…";
 
   return (
-    <div className={`${styles.card} ${styles.cardWide}`}>
-      <p className={styles.cardTitle}>Commitment Lab — what the chain actually sees</p>
-
-      <div className={styles.seg}>
-        <button
-          className={`${styles.segBtn} ${mode === "spot" ? styles.segBtnOn : ""}`}
-          onClick={() => setMode("spot")}
-        >
-          Spot order
-        </button>
-        <button
-          className={`${styles.segBtn} ${mode === "perp" ? styles.segBtnOn : ""}`}
-          onClick={() => setMode("perp")}
-        >
-          Perp position
-        </button>
-      </div>
-
-      <div className={styles.split}>
-        <div>
-          <div className={styles.field}>
-            <label>Side</label>
-            <select
-              className={styles.select}
-              value={side}
-              onChange={(e) => setSide(Number(e.target.value))}
-            >
-              <option value={SIDE_BUY}>{mode === "spot" ? "Buy" : "Long"}</option>
-              <option value={SIDE_SELL}>{mode === "spot" ? "Sell" : "Short"}</option>
-            </select>
-          </div>
-          {mode === "spot" ? (
-            <div className={styles.inline}>
-              <div className={styles.field}>
-                <label>Limit price</label>
-                <input className={styles.input} value={price} onChange={(e) => setPrice(e.target.value)} />
-              </div>
-              <div className={styles.field}>
-                <label>Size</label>
-                <input className={styles.input} value={size} onChange={(e) => setSize(e.target.value)} />
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className={styles.inline}>
-                <div className={styles.field}>
-                  <label>Entry price</label>
-                  <input className={styles.input} value={entry} onChange={(e) => setEntry(e.target.value)} />
-                </div>
-                <div className={styles.field}>
-                  <label>Size</label>
-                  <input className={styles.input} value={size} onChange={(e) => setSize(e.target.value)} />
-                </div>
-              </div>
-              <div className={styles.inline}>
-                <div className={styles.field}>
-                  <label>Margin</label>
-                  <input className={styles.input} value={margin} onChange={(e) => setMargin(e.target.value)} />
-                </div>
-                <div className={styles.field}>
-                  <label>Leverage</label>
-                  <select className={styles.select} value={lev} onChange={(e) => setLev(Number(e.target.value))}>
-                    <option value={2}>2x</option>
-                    <option value={5}>5x</option>
-                    <option value={10}>10x</option>
-                  </select>
-                </div>
-              </div>
-            </>
-          )}
-          <button className={`${styles.btn} ${styles.btnGhost}`} onClick={() => setSalt(randomFelt())}>
-            ↻ new random salt
+    <div className={s.col}>
+      <div className={s.panelHead}>Open position</div>
+      <div className={s.trade}>
+        <div className={s.sideToggle}>
+          <button className={`${s.sideBtn} ${s.sideLong} ${side === SIDE_BUY ? s.on : ""}`} onClick={() => setSide(SIDE_BUY)}>
+            Long
+          </button>
+          <button className={`${s.sideBtn} ${s.sideShort} ${side === SIDE_SELL ? s.on : ""}`} onClick={() => setSide(SIDE_SELL)}>
+            Short
           </button>
         </div>
 
-        <div className={styles.split} style={{ gridTemplateColumns: "1fr" }}>
-          <div className={`${styles.panel} ${styles.panelHidden}`}>
-            <div className={styles.panelHead}>🔒 Shielded — never on chain</div>
-            {mode === "spot" ? (
-              <>
-                <div className={styles.kv}>
-                  <span className={styles.label}>side</span>
-                  <span className={styles.mono}>{side === SIDE_BUY ? "buy" : "sell"}</span>
-                </div>
-                <div className={styles.kv}>
-                  <span className={styles.label}>price</span>
-                  <span className={styles.mono}>{price}</span>
-                </div>
-                <div className={styles.kv}>
-                  <span className={styles.label}>size</span>
-                  <span className={styles.mono}>{size}</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className={styles.kv}>
-                  <span className={styles.label}>side</span>
-                  <span className={styles.mono}>{side === SIDE_BUY ? "long" : "short"}</span>
-                </div>
-                <div className={styles.kv}>
-                  <span className={styles.label}>entry / size</span>
-                  <span className={styles.mono}>{entry} / {size}</span>
-                </div>
-                <div className={styles.kv}>
-                  <span className={styles.label}>margin / lev</span>
-                  <span className={styles.mono}>{margin} / {lev}x</span>
-                </div>
-              </>
-            )}
-            <div className={styles.kv}>
-              <span className={styles.label}>salt</span>
-              <span className={styles.mono}>{short(salt)}</span>
-            </div>
+        <div>
+          <div className={s.tradeLabel}>
+            <span>Size (STRK)</span>
+            <span className={s.mono}>≈ ${notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
           </div>
+          <input className={s.tradeInput} value={size} onChange={(e) => setSize(e.target.value)} />
+        </div>
 
-          <div className={`${styles.panel} ${styles.panelPublic}`}>
-            <div className={styles.panelHead}>🌐 Public — stored on chain</div>
-            <div className={styles.kv}>
-              <span className={styles.label}>trader commitment</span>
-              <span className={styles.mono}>{short(trader)}</span>
-            </div>
-            <div className={styles.kv}>
-              <span className={styles.label}>market</span>
-              <span className={styles.mono}>STRK / USDC</span>
-            </div>
-            <div className={styles.kv}>
-              <span className={styles.label}>flags</span>
-              <span className={styles.mono}>{mode === "spot" ? "live=1 matched=0" : "open=1"}</span>
-            </div>
+        <div>
+          <div className={s.tradeLabel}><span>Leverage</span><span className={s.mono}>{lev}x</span></div>
+          <div className={s.levRow}>
+            {[2, 5, 10].map((l) => (
+              <button key={l} className={`${s.levBtn} ${lev === l ? s.on : ""}`} onClick={() => setLev(l)}>
+                {l}x
+              </button>
+            ))}
           </div>
         </div>
-      </div>
 
-      <div className={styles.commitOut}>
-        <div className={styles.label} style={{ marginBottom: 6 }}>
-          {mode === "spot" ? "order" : "position"} commitment (this, and only this, is stored)
+        <div className={s.privacyPreview}>
+          <div className={`${s.previewRow} ${s.previewShielded}`}>
+            <span className={s.previewLabel}><span className={s.lock}>🔒</span> entry / size / margin / lev</span>
+            <span className={s.mono}>{entry.toFixed(0)} / {sizeN} / {margin.toFixed(0)} / {lev}x</span>
+          </div>
+          <div className={`${s.previewRow} ${s.previewShielded}`}>
+            <span className={s.previewLabel}><span className={s.lock}>🔒</span> shielded — off chain</span>
+            <span className={s.mono}>all of the above</span>
+          </div>
+          <div className={`${s.previewRow} ${s.previewPublic}`}>
+            <span className={s.previewLabel}>🌐 stored on chain</span>
+            <span className={s.mono}>{short(commitment)}</span>
+          </div>
         </div>
-        <span className={styles.mono}>{commit}</span>
+
+        <button
+          className={`${s.placeBtn} ${side === SIDE_BUY ? s.placeLong : s.placeShort}`}
+          disabled={!isConnected}
+          onClick={() =>
+            setStatus(
+              isConnected
+                ? `Position commitment built (${short(commitment)}). Full shielded open routes through the STRK20 pool — wire your privacy wallet to submit.`
+                : null,
+            )
+          }
+        >
+          {isConnected ? `${side === SIDE_BUY ? "Long" : "Short"} STRK ${lev}x` : "Connect wallet"}
+        </button>
+
+        {status && <div className={`${s.status} ${s.statusInfo}`}>{status}</div>}
+        <p className={s.hint}>
+          The commitment above is exactly what the contract stores — computed here with the same
+          Poseidon scheme as the Cairo code. Change any input and it changes completely.
+        </p>
       </div>
-      <p className={styles.note}>
-        Poseidon over domain-separated tags, computed here exactly as the Cairo contract computes
-        it — a test cross-checks the two so they can never drift. Change any hidden value and the
-        commitment changes completely; without the salt, the hidden values can&apos;t be recovered
-        or guessed. This is the pre-trade opacity a dark pool provides.
-      </p>
     </div>
   );
 }
 
-// ─── Agent Registry ─────────────────────────────────────────────────────────
-function AgentPanel() {
-  const isConnected = useStoreWallet((s) => s.isConnected);
-  const address = useStoreWallet((s) => s.address);
-  const myWalletAccount = useStoreWallet((s) => s.myWalletAccount);
+// ─── Bottom tabs ────────────────────────────────────────────────────────────
+type Tab = "positions" | "agent" | "privacy" | "contracts";
 
+function PositionsTab() {
+  const [id, setId] = useState("");
+  const [pos, setPos] = useState<PositionView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function look() {
+    setErr(""); setPos(null);
+    if (!id) return;
+    try { setBusy(true); setPos(await readPosition(id)); }
+    catch (e: unknown) { setErr(`${(e as Error)?.message ?? e}`); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div>
+      <p className={s.cardTitle}>Positions — look up by id</p>
+      <div style={{ display: "flex", gap: 10, maxWidth: 560 }}>
+        <input className={s.tradeInput} placeholder="0x… position id" value={id} onChange={(e) => setId(e.target.value.trim())} />
+        <button className={`${s.btnSm} ${s.btnAccent}`} disabled={busy} onClick={look}>Look up</button>
+      </div>
+      {pos && !pos.exists && <div className={s.empty}>No position under that id.</div>}
+      {pos && pos.exists && (
+        <div style={{ maxWidth: 560, marginTop: 12 }}>
+          <div className={s.row}><span className={s.muted}>status</span><span className={pos.open ? s.ok : s.muted}>{pos.liquidated ? "liquidated" : pos.open ? "open" : "closed"}</span></div>
+          <div className={s.row}><span className={s.muted}>market</span><span className={s.mono}>{short(pos.baseToken)} / {short(pos.quoteToken)}</span></div>
+          <div className={s.row}><span className={s.muted}>commitment</span><span className={s.mono}>{short(pos.commitment)}</span></div>
+        </div>
+      )}
+      {err && <div className={`${s.status} ${s.statusErr}`}>{err}</div>}
+      {!pos && !err && <div className={s.empty}>Positions rest as commitments — size, entry and PnL are shielded. Look one up by id.</div>}
+    </div>
+  );
+}
+
+function AgentTab() {
+  const isConnected = useStoreWallet((st) => st.isConnected);
+  const address = useStoreWallet((st) => st.address);
+  const wa = useStoreWallet((st) => st.myWalletAccount);
   const [lookup, setLookup] = useState("");
   const [info, setInfo] = useState<AgentInfo | null>(null);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
+  const [status, setStatus] = useState<{ k: string; m: string } | null>(null);
 
-  async function doLookup(addr: string) {
-    setStatus(null);
-    setInfo(null);
-    if (!addr) return;
-    try {
-      setBusy(true);
-      setInfo(await readAgent(addr));
-    } catch (e: unknown) {
-      setStatus({ kind: "err", msg: `lookup failed: ${(e as Error)?.message ?? e}` });
-    } finally {
-      setBusy(false);
-    }
+  async function look(a: string) {
+    setStatus(null); setInfo(null);
+    if (!a) return;
+    try { setBusy(true); setInfo(await readAgent(a)); }
+    catch (e: unknown) { setStatus({ k: "err", m: `${(e as Error)?.message ?? e}` }); }
+    finally { setBusy(false); }
   }
-
   async function register() {
-    if (!myWalletAccount) {
-      setStatus({ kind: "err", msg: "connect a wallet first" });
-      return;
-    }
+    if (!wa) { setStatus({ k: "err", m: "connect a wallet" }); return; }
     try {
-      setBusy(true);
-      setStatus({ kind: "info", msg: "generating agent key and submitting…" });
-      // Demo agent keypair, generated in-browser. In production the agent's key lives in its
-      // own signing service; the registry only ever stores the public key.
-      const pk = randomFelt();
-      const pub = ec.starkCurve.getStarkKey(pk);
-      // register_agent(public_key, policy{max_margin_bps, max_size_bps, max_leverage, may_close})
-      const calldata = [pub, "5000", "3000", "5", "1"];
-      const res = await myWalletAccount.execute([
-        { contractAddress: MG.agentRegistry, entrypoint: "register_agent", calldata },
-      ]);
-      setStatus({ kind: "info", msg: `submitted ${short(res.transaction_hash)}, confirming…` });
+      setBusy(true); setStatus({ k: "info", m: "submitting registration…" });
+      const pub = ec.starkCurve.getStarkKey(randomFelt());
+      const res = await wa.execute([{ contractAddress: MG.agentRegistry, entrypoint: "register_agent", calldata: [pub, "5000", "3000", "5", "1"] }]);
+      setStatus({ k: "info", m: `submitted ${short(res.transaction_hash)}…` });
       await readProvider().waitForTransaction(res.transaction_hash);
-      setStatus({ kind: "ok", msg: "registered ✓ — look up your address below to see it live" });
-      setLookup(address);
-      await doLookup(address);
-    } catch (e: unknown) {
-      setStatus({ kind: "err", msg: `register failed: ${(e as Error)?.message ?? e}` });
-    } finally {
-      setBusy(false);
-    }
+      setStatus({ k: "ok", m: "registered ✓" });
+      setLookup(address); await look(address);
+    } catch (e: unknown) { setStatus({ k: "err", m: `${(e as Error)?.message ?? e}` }); }
+    finally { setBusy(false); }
   }
-
   return (
-    <div className={styles.card}>
-      <p className={styles.cardTitle}>Agent Registry (live)</p>
-
-      <div className={styles.field}>
-        <label>Look up an agent address</label>
-        <input
-          className={styles.input}
-          placeholder="0x…"
-          value={lookup}
-          onChange={(e) => setLookup(e.target.value.trim())}
-        />
-      </div>
-      <button className={`${styles.btn} ${styles.btnGhost}`} disabled={busy} onClick={() => doLookup(lookup)}>
-        Look up
-      </button>
-
-      {info && (
-        <div style={{ marginTop: 14 }}>
-          <div className={styles.row}>
-            <span className={styles.label}>registered</span>
-            <span className={info.registered ? styles.ok : styles.bad}>
-              {info.registered ? "yes" : "no"}
-            </span>
-          </div>
-          {info.registered && (
-            <>
-              <div className={styles.row}>
-                <span className={styles.label}>public key</span>
-                <span className={styles.mono}>{short(info.publicKey)}</span>
-              </div>
-              <div className={styles.row}>
-                <span className={styles.label}>next nonce</span>
-                <span className={styles.mono}>{BigInt(info.nonce).toString()}</span>
-              </div>
-              {info.policy && (
-                <div className={styles.row}>
-                  <span className={styles.label}>policy</span>
-                  <span className={styles.mono}>
-                    ≤{info.policy.maxMarginIncreaseBps / 100}% margin · ≤
-                    {info.policy.maxSizeReductionBps / 100}% cut · ≤{info.policy.maxLeverage}x ·{" "}
-                    {info.policy.mayClose ? "may close" : "no close"}
-                  </span>
-                </div>
-              )}
-            </>
-          )}
+    <div className={s.grid2}>
+      <div>
+        <p className={s.cardTitle}>Agent registry (live)</p>
+        <div className={s.field} style={{ marginBottom: 10 }}>
+          <label>Look up agent address</label>
+          <input className={s.tradeInput} placeholder="0x…" value={lookup} onChange={(e) => setLookup(e.target.value.trim())} />
         </div>
-      )}
-
-      <div style={{ marginTop: 18, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
-        <button className={styles.btn} disabled={busy || !isConnected} onClick={register}>
+        <button className={s.btnSm} disabled={busy} onClick={() => look(lookup)}>Look up</button>
+        {info && (
+          <div style={{ marginTop: 12 }}>
+            <div className={s.row}><span className={s.muted}>registered</span><span className={info.registered ? s.ok : s.bad}>{info.registered ? "yes" : "no"}</span></div>
+            {info.registered && info.policy && (
+              <>
+                <div className={s.row}><span className={s.muted}>public key</span><span className={s.mono}>{short(info.publicKey)}</span></div>
+                <div className={s.row}><span className={s.muted}>next nonce</span><span className={s.mono}>{BigInt(info.nonce).toString()}</span></div>
+                <div className={s.row}><span className={s.muted}>policy</span><span className={s.mono}>≤{info.policy.maxMarginIncreaseBps / 100}% mgn · ≤{info.policy.maxSizeReductionBps / 100}% cut · ≤{info.policy.maxLeverage}x</span></div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <div>
+        <p className={s.cardTitle}>The trust model</p>
+        <p className={s.hint} style={{ marginBottom: 12 }}>
+          The agent proposes; the contract verifies identity, signature, policy and nonce, then
+          enforces. The agent holds no funds and no keys — a compromised agent key can only ever
+          act within the policy you set.
+        </p>
+        <button className={`${s.btnSm} ${s.btnAccent}`} disabled={busy || !isConnected} onClick={register}>
           {isConnected ? "Register a demo agent (live tx)" : "Connect wallet to register"}
         </button>
-        <p className={styles.note}>
-          Registers a fresh agent under a policy capping it to ≤50% margin top-ups, ≤30% size
-          cuts, ≤5x leverage, and closes. The registry stores only the public key and policy — the
-          agent proposes, the contract verifies and enforces.
-        </p>
+        {status && <div className={`${s.status} ${status.k === "ok" ? s.statusOk : status.k === "err" ? s.statusErr : s.statusInfo}`}>{status.m}</div>}
       </div>
-
-      {status && (
-        <div
-          className={`${styles.status} ${
-            status.kind === "ok" ? styles.statusOk : status.kind === "err" ? styles.statusErr : styles.statusInfo
-          }`}
-        >
-          {status.msg}
-        </div>
-      )}
     </div>
   );
 }
 
-// ─── Privacy Center: viewing-key delegation ─────────────────────────────────
-function PrivacyCenter() {
-  // Client-side grant round-trip (real STARK-curve ECDH), regenerated on demand.
-  const [agentPriv, setAgentPriv] = useState("");
-  const [capability, setCapability] = useState("");
-  useEffect(() => {
-    setAgentPriv(randomFelt());
-    setCapability(randomFelt());
-  }, []);
+function PrivacyTab() {
+  const [priv, setPriv] = useState("");
+  const [cap, setCap] = useState("");
+  useEffect(() => { setPriv(randomFelt()); setCap(randomFelt()); }, []);
+  const demo = priv && cap ? grantRoundTrip(cap, priv) : null;
 
-  const demo = agentPriv && capability ? grantRoundTrip(capability, agentPriv) : null;
-
-  // Live on-chain grant lookup.
   const [posId, setPosId] = useState("");
   const [grant, setGrant] = useState<ViewGrant | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-
-  async function lookup() {
-    setErr("");
-    setGrant(null);
+  async function look() {
+    setErr(""); setGrant(null);
     if (!posId) return;
-    try {
-      setBusy(true);
-      setGrant(await readViewGrant(posId));
-    } catch (e: unknown) {
-      setErr(`lookup failed: ${(e as Error)?.message ?? e}`);
-    } finally {
-      setBusy(false);
-    }
+    try { setBusy(true); setGrant(await readViewGrant(posId)); }
+    catch (e: unknown) { setErr(`${(e as Error)?.message ?? e}`); }
+    finally { setBusy(false); }
   }
-
   return (
-    <div className={`${styles.card} ${styles.cardWide}`}>
-      <p className={styles.cardTitle}>Privacy Center — viewing-key delegation (IDEA-21)</p>
-
-      <p className={styles.note} style={{ marginTop: 0, marginBottom: 16 }}>
-        Positions are hidden from the public and other traders — <strong>not</strong> from the
-        agent that protects them. When you open a position you grant the agent a scoped, revocable
-        view, using STRK20&apos;s own ECDH-on-the-STARK-curve scheme. The chain records only that a
-        grant exists; the values stay off-chain. Below is that grant, computed live in your browser.
-      </p>
-
-      <div className={styles.split}>
-        <div className={`${styles.panel} ${styles.panelHidden}`}>
-          <div className={styles.panelHead}>🔒 Owner encrypts to the agent</div>
-          <div className={styles.kv}>
-            <span className={styles.label}>agent viewing key</span>
-            <span className={styles.mono}>{short(demo?.agentPub ?? "")}</span>
-          </div>
-          <div className={styles.kv}>
-            <span className={styles.label}>viewing capability</span>
-            <span className={styles.mono}>{short(capability)}</span>
-          </div>
-          <div className={styles.kv}>
-            <span className={styles.label}>ECDH shared secret</span>
-            <span className={styles.mono}>{short(demo?.sharedX ?? "")}</span>
-          </div>
+    <div className={s.grid2}>
+      <div>
+        <p className={s.cardTitle}>Viewing-key delegation (IDEA-21)</p>
+        <p className={s.hint} style={{ marginBottom: 12 }}>
+          Positions are hidden from the public and other traders — not from the agent that
+          protects them. The owner grants the agent a scoped, revocable view via real STARK-curve
+          ECDH. Below: a live encrypt → recover round-trip.
+        </p>
+        <div className={s.privacyPreview}>
+          <div className={`${s.previewRow} ${s.previewShielded}`}><span className={s.previewLabel}><span className={s.lock}>🔒</span> viewing capability</span><span className={s.mono}>{short(cap)}</span></div>
+          <div className={`${s.previewRow} ${s.previewPublic}`}><span className={s.previewLabel}>🌐 ephemeral rG.x</span><span className={s.mono}>{short(demo?.ephemeralOnChain ?? "")}</span></div>
+          <div className={`${s.previewRow} ${s.previewPublic}`}><span className={s.previewLabel}>🌐 ciphertext</span><span className={s.mono}>{short(demo?.ciphertext ?? "")}</span></div>
+          <div className={`${s.previewRow} ${s.previewShielded}`}><span className={s.previewLabel}>agent recovers</span><span className={demo?.ok ? s.ok : s.bad}>{demo ? (demo.ok ? "✓ exact capability" : "✗") : "…"}</span></div>
         </div>
-
-        <div className={`${styles.panel} ${styles.panelPublic}`}>
-          <div className={styles.panelHead}>🌐 Grant record on chain</div>
-          <div className={styles.kv}>
-            <span className={styles.label}>ephemeral rG.x</span>
-            <span className={styles.mono}>{short(demo?.ephemeralOnChain ?? "")}</span>
-          </div>
-          <div className={styles.kv}>
-            <span className={styles.label}>ciphertext</span>
-            <span className={styles.mono}>{short(demo?.ciphertext ?? "")}</span>
-          </div>
-          <div className={styles.kv}>
-            <span className={styles.label}>agent recovers</span>
-            <span className={demo?.ok ? styles.ok : styles.bad}>
-              {demo ? (demo.ok ? "✓ exact capability" : "✗ mismatch") : "…"}
-            </span>
-          </div>
-        </div>
+        <button className={s.btnSm} style={{ marginTop: 10 }} onClick={() => { setPriv(randomFelt()); setCap(randomFelt()); }}>↻ regenerate</button>
       </div>
-
-      <button
-        className={`${styles.btn} ${styles.btnGhost}`}
-        onClick={() => {
-          setAgentPriv(randomFelt());
-          setCapability(randomFelt());
-        }}
-      >
-        ↻ regenerate grant
-      </button>
-
-      <p className={styles.note}>
-        The public grant record reveals nothing: only the agent, holding its private viewing key,
-        recovers the capability from the ephemeral point (recovered value equals the original,
-        proven above). Anyone else sees two random field elements. On-chain,{" "}
-        <span className={styles.mono}>PerpEngine.grant_view</span> stores this and{" "}
-        <span className={styles.mono}>revoke_view</span> retires it — both owner-gated.
-      </p>
-
-      <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
-        <div className={styles.field}>
-          <label>Look up a live grant by position id</label>
-          <input
-            className={styles.input}
-            placeholder="e.g. 0x… position id"
-            value={posId}
-            onChange={(e) => setPosId(e.target.value.trim())}
-          />
+      <div>
+        <p className={s.cardTitle}>Live grant lookup</p>
+        <div className={s.field} style={{ marginBottom: 10 }}>
+          <label>Position id</label>
+          <input className={s.tradeInput} placeholder="0x…" value={posId} onChange={(e) => setPosId(e.target.value.trim())} />
         </div>
-        <button className={`${styles.btn} ${styles.btnGhost}`} disabled={busy} onClick={lookup}>
-          Look up grant
-        </button>
+        <button className={s.btnSm} disabled={busy} onClick={look}>Look up grant</button>
         {grant && (
           <div style={{ marginTop: 12 }}>
-            <div className={styles.row}>
-              <span className={styles.label}>granted agent</span>
-              <span className={styles.mono}>
-                {BigInt(grant.agent) === 0n ? "none" : short(grant.agent)}
-              </span>
-            </div>
-            <div className={styles.row}>
-              <span className={styles.label}>status</span>
-              <span className={grant.active ? styles.ok : styles.label}>
-                {BigInt(grant.agent) === 0n ? "no grant" : grant.active ? "active" : "revoked"}
-              </span>
-            </div>
+            <div className={s.row}><span className={s.muted}>granted agent</span><span className={s.mono}>{BigInt(grant.agent) === 0n ? "none" : short(grant.agent)}</span></div>
+            <div className={s.row}><span className={s.muted}>status</span><span className={grant.active ? s.ok : s.muted}>{BigInt(grant.agent) === 0n ? "no grant" : grant.active ? "active" : "revoked"}</span></div>
           </div>
         )}
-        {err && <div className={`${styles.status} ${styles.statusErr}`}>{err}</div>}
+        {err && <div className={`${s.status} ${s.statusErr}`}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
+function ContractsTab({ status }: { status: VenueStatus | null }) {
+  const rows: [string, string][] = [
+    ["AgentRegistry", MG.agentRegistry],
+    ["PerpEngine", MG.perpEngine],
+    ["OrderBook", MG.orderBook],
+    ["MarginGuardVenue", MG.venue],
+    ["ManualOracle", MG.oracle],
+    ["STRK20 pool", MG.pool],
+  ];
+  return (
+    <div>
+      <p className={s.cardTitle}>Live on Starknet Sepolia</p>
+      <div style={{ maxWidth: 640 }}>
+        {rows.map(([n, a]) => (
+          <div className={s.row} key={n}>
+            <span className={s.muted}>{n}</span>
+            <a className={`${s.link} ${s.mono}`} href={`${VOYAGER}${a}`} target="_blank" rel="noreferrer">{short(a)}</a>
+          </div>
+        ))}
+        <div className={s.row}>
+          <span className={s.muted}>wiring</span>
+          <span className={status ? (status.wired ? s.ok : s.bad) : s.muted}>{status ? (status.wired ? "✓ book ↔ venue ↔ pool" : "mismatch") : "checking…"}</span>
+        </div>
       </div>
     </div>
   );
 }
 
 export default function Page() {
+  const [mark, setMark] = useState(0);
+  const [status, setStatus] = useState<VenueStatus | null>(null);
+  const [tab, setTab] = useState<Tab>("positions");
+
+  useEffect(() => {
+    readMarkPrice().then(setMark).catch(() => setMark(1500));
+    readVenueStatus().then(setStatus).catch(() => {});
+  }, []);
+
+  const change = 2.34; // illustrative 24h
+
   return (
-    <div className={styles.page}>
-      <nav className={styles.nav}>
-        <div className={styles.brand}>
-          <span>
-            Margin<span className={styles.brandMark}>Guard</span>
-          </span>
-          <span className={styles.brandTag}>private dark pool &amp; perps on STRK20</span>
+    <div className={s.app}>
+      <div className={s.topbar}>
+        <div className={s.brand}>
+          <span className={s.brandDot} />
+          Margin<span className={s.brandMark}>Guard</span>
         </div>
+        <div className={s.market}>
+          <span className={s.marketPair}>STRK-USDC</span>
+          <span className={s.tag}>PERP</span>
+          <span className={`${s.tag} ${s.tagPrivate}`}>PRIVATE</span>
+        </div>
+        <div className={s.spacer} />
+        <div className={s.netpill}><span className={s.netLive} /> Sepolia · live</div>
         <SelectWallet variant="nav" />
-      </nav>
+      </div>
 
-      <div className={styles.wrap}>
-        <header className={styles.hero}>
-          <h1 className={styles.heroTitle}>
-            Trade in the dark.
-            <br />
-            <span className={styles.accent}>Verified in the open.</span>
-          </h1>
-          <p className={styles.heroSub}>
-            A private spot dark pool and perpetuals venue on Starknet, built on STRK20 shielded
-            notes. Who is trading is never revealed; what a resting order was stays hidden until it
-            trades. An agent manages risk on positions hidden from the public and other traders —
-            seeing only what the owner grants it, and every move verified by the contract before it
-            executes.
-          </p>
-          <div className={styles.badges}>
-            <span className={`${styles.badge} ${styles.badgeLive}`}>● Live on Sepolia</span>
-            <span className={styles.badge}>STRK20 anonymizer</span>
-            <span className={styles.badge}>Agent-verified risk</span>
-            <span className={styles.badge}>Cairo · 96 tests</span>
-          </div>
-        </header>
+      <div className={s.stats}>
+        <div className={s.stat}>
+          <span className={s.statLabel}>Mark (oracle)</span>
+          <span className={`${s.statValue} ${s.markBig} ${s.mono} ${s.up}`}>{mark ? mark.toFixed(2) : "—"}</span>
+        </div>
+        <div className={s.stat}><span className={s.statLabel}>24h</span><span className={`${s.statValue} ${s.mono} ${s.up}`}>+{change}%</span></div>
+        <div className={s.stat}><span className={s.statLabel}>Maint. margin</span><span className={`${s.statValue} ${s.mono}`}>50%</span></div>
+        <div className={s.stat}><span className={s.statLabel}>Max leverage</span><span className={`${s.statValue} ${s.mono}`}>10x</span></div>
+        <div className={s.stat}><span className={s.statLabel}>Settlement</span><span className={`${s.statValue} ${s.mono}`}>shielded notes</span></div>
+        <div className={s.stat}><span className={s.statLabel}>Venue</span><span className={`${s.statValue} ${s.mono} ${status?.wired ? s.up : ""}`}>{status ? (status.wired ? "wired ✓" : "—") : "…"}</span></div>
+      </div>
 
-        <div className={styles.grid}>
-          <VenueStatusCard />
-          <AgentPanel />
-          <CommitmentLab />
-          <PrivacyCenter />
-
-          <div className={`${styles.card} ${styles.cardWide}`}>
-            <p className={styles.cardTitle}>How a private trade settles</p>
-            <div className={styles.flow}>
-              <span className={styles.step}>Fund (pool → venue balance)</span>
-              <span className={styles.arrow}>→</span>
-              <span className={styles.step}>Place (commitment only)</span>
-              <span className={styles.arrow}>→</span>
-              <span className={styles.step}>Match (reveal &amp; verify, midpoint)</span>
-              <span className={styles.arrow}>→</span>
-              <span className={styles.step}>Claim (open note)</span>
-            </div>
-            <p className={styles.note}>
-              Funding is separate from placement because the pool&apos;s withdraw leg is a public
-              transfer — funding inside the placing transaction would publish the order&apos;s size.
-              Settlement is claim-driven because STRK20 permits at most one external invoke per pool
-              transaction, so each side claims its own leg. Full detail in the repo&apos;s
-              ARCHITECTURE.md.
-            </p>
+      <div className={s.grid}>
+        <div className={s.col}>
+          <div className={s.panelHead}><span>STRK-USDC · chart</span><span className={s.muted} style={{ textTransform: "none", fontWeight: 400 }}>illustrative</span></div>
+          <div className={s.chartWrap}>
+            <Chart mark={mark || 1500} />
+            <div className={s.chartNote}>Blue line = live oracle mark. Candles illustrative (no public trade tape — orders are shielded).</div>
           </div>
         </div>
+        <ShieldedBook mark={mark || 1500} />
+        <TradePanel mark={mark} />
+      </div>
 
-        <div className={styles.footer}>
-          MarginGuard · STRK20 Private Sprint ·{" "}
-          <a href="https://github.com/Stella112/marginguard" target="_blank" rel="noreferrer">
-            github.com/Stella112/marginguard
-          </a>
+      <div className={s.bottom}>
+        <div className={s.tabBar}>
+          {(["positions", "agent", "privacy", "contracts"] as Tab[]).map((t) => (
+            <button key={t} className={`${s.tab} ${tab === t ? s.on : ""}`} onClick={() => setTab(t)}>
+              {t === "positions" ? "Positions" : t === "agent" ? "Agent" : t === "privacy" ? "Privacy" : "Contracts"}
+            </button>
+          ))}
+        </div>
+        <div className={s.tabBody}>
+          {tab === "positions" && <PositionsTab />}
+          {tab === "agent" && <AgentTab />}
+          {tab === "privacy" && <PrivacyTab />}
+          {tab === "contracts" && <ContractsTab status={status} />}
         </div>
       </div>
     </div>

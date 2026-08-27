@@ -14,9 +14,31 @@ alongside the threat model, which is in
 | 4 | The caller to reveal *some* values | That the revealed values are true | Commitment re-derivation on every action |
 | 5 | The venue to hold funds mid-transaction | The venue to hold more than it was funded | Credited totals checked against real balance |
 
+## Agent visibility (scoped, not blind)
+
+The agent is **not blind** to the positions it manages, and this is deliberate. It needs the real
+margin, size, entry and PnL to compute collateral health, so:
+
+- When the owner opens a position, they grant the registered agent **scoped viewing access** to
+  that position, built on STRK20's ECDH-on-the-STARK-curve primitive at the application level
+  (STRK20 has no native owner→third-party per-position delegation call; see the README and the
+  architecture report for why this is an app-level construction, not a native STRK20 call).
+- The agent decrypts the position off-chain with its viewing key and computes health from the
+  real numbers. The chain records that a grant exists and that actions were proposed/executed —
+  never the underlying values.
+- The grant is **scoped** (to that position) and **revocable** (the owner can revoke; the Privacy
+  Center shows active grants).
+
+State this precisely everywhere: positions are **hidden from the public and other market
+participants, not from the agent that protects them.** The agent has necessary, scoped visibility
+to do its job — comparable to a fraud-detection system seeing transactions the public cannot.
+This is a documented trust boundary, not a privacy failure.
+
 ## Agent assumptions
 
-The agent is **untrusted by design**. It signs proposals; the contracts decide.
+The agent is **untrusted for authority**, even though it is granted visibility. It signs
+proposals; the contracts decide. Visibility lets it *decide what to propose*; it grants no power
+to *execute* anything the contract has not independently verified.
 
 - A proposal is applied only if it is signed by the registered key, sits within the agent's
   registered policy bounds, and carries the expected nonce. Any failure reverts the whole call.
@@ -50,8 +72,21 @@ enforces, but the contract cannot judge whether a bound is wise.
 
 Stated plainly, because a privacy claim is only worth what its limits admit.
 
-- **What is genuinely hidden:** the identity of who is trading (the pool never reveals the
-  initiator), and an order's or position's economics **until it is acted on**.
+- **The precise claim:** economics are **hidden from the public and other market participants**,
+  not from all parties. The owner sees their own; the registered agent sees the positions it was
+  granted. Never phrase this as "hidden from everyone."
+- **What is genuinely hidden from the public:** the identity of who is trading (the pool never
+  reveals the initiator), and an order's or position's economics **until it is acted on**.
+- **Exit triggers are not timing-attack resistant.** An agent-managed stop-loss / take-profit
+  relies on the viewing-key mechanism, not confidential compute. The raw trigger value is never
+  written to public state and is decryptable only by the owner and the granted agent — but an
+  attacker observing *when* the agent submits a close transaction may still infer information
+  about approximate trigger timing, even without knowing the price. This is a known, honestly
+  documented limitation, **not** a solved problem. Describe it exactly as: "hidden from public
+  view and other market participants, using STRK20's viewing-key primitive; full protection
+  against timing-based inference would require confidential-compute infrastructure not yet
+  available on STRK20." Never call the trigger mechanism fully confidential or timing-attack
+  resistant.
 - **Open-note amounts are public.** Any amount that reaches a user through an anonymizer — a spot
   claim, a perp settlement — is plaintext by STRK20 protocol design. Settlement amounts and PnL
   are therefore public. This is not an implementation gap; it cannot be engineered around at the

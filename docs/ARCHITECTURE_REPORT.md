@@ -82,6 +82,46 @@ derives from it.
 Registration is a **prerequisite**: both sender and recipient must be registered
 before a private transfer, and only the recipient can register themselves.
 
+### 1.5.1 Owner→agent scoped viewing delegation (verified gap + chosen construction)
+
+The risk agent must read a position's real economics to compute health. The brief
+assumes a native STRK20 primitive for an owner to grant a chosen third party scoped
+view of one position. **Verified against the docs: no such primitive exists.** STRK20
+documents exactly two viewing paths:
+
+1. **Owner self-view** — the owner holds `k` and decrypts their own notes.
+2. **Auditor escrow** — at registration, `k` is encrypted *once* to a
+   **governance-fixed auditor** public key via ECDH. Whole-key, not per-position, and
+   to a key the owner does not choose.
+
+Neither is owner→agent, per-position, or owner-chosen. Per the rules ("do not assume
+STRK20 internals; do not invent encryption systems"), this is flagged rather than
+assumed.
+
+**Chosen construction (app-level, on STRK20's own ECDH primitive).** STRK20's entire
+viewing system is ephemeral **ECDH on the STARK curve** — `sender picks r; publishes
+rG; shared = r·K; enc = h(TAG, shared.x) + data`, used for both channels and the
+auditor escrow. MarginGuard reuses *that exact scheme* at the application level:
+
+- The agent registers a **viewing public key** `K_agent` in the registry.
+- At `open_position` the owner picks ephemeral `r`, publishes `rG`, computes
+  `shared = r·K_agent`, and stores `enc = h(GRANT_TAG, shared.x) + capability`
+  on-chain alongside the position, plus a revocable grant flag.
+- The agent recovers `shared = k_agent · rG`, decrypts the capability, and reads the
+  position off-chain.
+
+This invents no cryptography — it is STRK20's documented ECDH masking applied to a new
+recipient. It is **documented everywhere as an app-level construction, never as a
+native STRK20 call.** It maps to **IDEA-21 (Selective disclosure tooling)**, an
+organizer-listed idea with no warning.
+
+**What the chain records:** that a grant exists and that actions were proposed and
+executed for a position — never the underlying values. **What it does not defend:**
+timing-correlation on *when* the agent acts (see the limitation in §7 and
+SECURITY_ASSUMPTIONS.md). Confidential-compute would be required to close that, and it
+is not available on STRK20 — so IDEA-04 and IDEA-06 (both carrying the organizers'
+confidential-compute warning) are deliberately not anchored to.
+
 ### 1.6 Channels and discovery
 
 ```

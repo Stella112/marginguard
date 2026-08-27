@@ -419,8 +419,9 @@ export default function Page() {
           <p className={styles.heroSub}>
             A private spot dark pool and perpetuals venue on Starknet, built on STRK20 shielded
             notes. Who is trading is never revealed; what a resting order was stays hidden until it
-            trades. An agent manages risk on positions nobody else can see — every move verified by
-            the contract before it executes.
+            trades. An agent manages risk on positions hidden from the public and other traders —
+            seeing only what the owner grants it, and every move verified by the contract before it
+            executes.
           </p>
           <div className={styles.badges}>
             <span className={`${styles.badge} ${styles.badgeLive}`}>● Live on Sepolia</span>

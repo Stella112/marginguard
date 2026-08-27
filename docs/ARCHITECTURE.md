@@ -128,12 +128,38 @@ The agent supplies only a signature. It never holds funds, never writes state di
 never push a position past its policy — so a **compromised agent key is survivable** (see the
 threat model in [SECURITY_ASSUMPTIONS.md](SECURITY_ASSUMPTIONS.md)).
 
+### How the agent sees the position (viewing-key delegation)
+
+Step 1 above — "the agent observes the position" — is not magic and not a privacy hole. Positions
+are hidden **from the public and other market participants, not from the agent that protects
+them.**
+
+STRK20's viewing system is ECDH on the STARK curve. It documents the owner's self-view and a
+single whole-key escrow to a governance-fixed auditor — but no native owner→chosen-third-party
+per-position delegation. MarginGuard builds that grant at the **application level on STRK20's own
+ECDH primitive**:
+
+- The agent registers a **viewing public key** in `AgentRegistry` (alongside its signing key).
+- At `open_position`, the owner ECDH-encrypts the position's viewing capability to the agent's
+  viewing key and records the grant on-chain: the ephemeral public key `rG` and the masked
+  capability, exactly the shape STRK20 uses for channels and the auditor escrow.
+- The agent recovers the shared secret (`k_agent · rG`), decrypts the capability off-chain, and
+  reads the real margin / size / entry / PnL to compute health.
+- The grant is scoped to the position and **revocable** by the owner.
+
+The chain records only that a grant exists and that actions were proposed and executed — never
+the underlying values. This is IDEA-21 (selective disclosure tooling) built on the real
+primitive; it is documented as an app-level construction, not a native STRK20 call, because that
+call does not exist. Its one honest limit: it does not defend against timing-correlation on when
+the agent acts — see SECURITY_ASSUMPTIONS.md.
+
 ## What is public and what is shielded
 
 Full table in [ARCHITECTURE_REPORT.md §4](ARCHITECTURE_REPORT.md). In short:
 
-- **Shielded:** who is trading (never revealed), and an order's or position's economics **until
-  it is acted on**.
+- **Shielded from the public and other traders:** who is trading (never revealed), and an order's
+  or position's economics **until it is acted on**. A position's economics are additionally
+  visible to the owner and to the agent the owner granted — never to the public.
 - **Public:** existence and lifecycle flags, the market, agent identity and action type, and —
   once a leg settles — the settlement amount (an open-note amount is plaintext by protocol).
 

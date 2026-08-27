@@ -1,43 +1,137 @@
-# MarginGuard — Private Dark Pool & Perpetuals on Starknet, with Agent-Verified Risk Management
+# MarginGuard — Private Dark Pool & Perpetuals on Starknet
 
-**Track:** Privacy DeFi (STRK20 Private Sprint)
+**Track:** Privacy DeFi · STRK20 Private Sprint
+**Status:** Contracts complete (96 tests), **live on Starknet Sepolia**, frontend wired to the deployment.
 
-**One-line pitch:** A native spot dark pool and perpetuals venue on Starknet, built on STRK20's shielded-note infrastructure, where a registered agent continuously manages each user's collateral health, position size, and exit conditions on a fully hidden position — every adjustment verified by a Cairo circuit before it executes.
+A private spot **dark pool** and **perpetuals** venue on Starknet, built on STRK20 shielded
+notes, with a registered agent that manages risk on each position — **the agent proposes, the
+contract verifies, the contract enforces.** Who is trading is never revealed; what a resting
+order was stays hidden until it trades.
+
+> **On "circuit" vs "contract".** STRK20 proves *pool transactions* over a fixed action set and
+> exposes no user-supplied circuit. Every guarantee in MarginGuard is therefore enforced by
+> **Cairo contract logic**, not by an application circuit. This README says "contract" wherever
+> an earlier draft said "circuit," deliberately.
 
 ---
 
 ## The problem
 
-Public order books and AMM pools leak everything before a trade settles — size, direction, and price impact are visible to anyone watching the mempool. STRK20 has made private transfers, swaps, lending, and staking native on Starknet, but there's no private *matching* venue built on it — no dark pool, no private perpetuals using STRK20's own shielded-note primitive. Separately, active risk management (dynamic margin, trailing stops, leverage adjustment) is now standard on public perps platforms like Hyperliquid — but always over fully visible positions, because the agents doing that work need to see the position to protect it. Nobody has combined the two. MarginGuard does.
+Public order books leak everything before a trade settles — size, direction, price impact.
+STRK20 made private transfers, swaps, lending and staking native on Starknet, but there was no
+private *matching* venue on it: no dark pool, no private perps on STRK20's shielded notes.
+Separately, active risk management (dynamic margin, trailing exits, leverage adjustment) is
+standard on public perps like Hyperliquid — but always over *fully visible* positions, because
+the agent doing that work has to see the position to protect it. MarginGuard combines the two:
+private positions, and an agent that manages them under a scoped, revocable grant.
 
 ## What it is
 
-- **Spot dark pool** — hidden limit orders, matched at a circuit-enforced midpoint, settled into shielded STRK20 notes. If no opposing order exists, it falls back to an Ekubo swap (unshield → swap → reshield), so a trade always completes.
-- **Perps** — leveraged long/short positions, hidden entry, size, and PnL, settled into shielded notes.
-- **Matching engine** — plain, verified logic (not agentic) that pairs opposing spot and perps orders and checks the price is fair. This is deterministic math, not judgment, so it's built as ordinary Cairo logic.
-- **Risk-management agent** — the one genuinely agentic piece. For each open perps position, the agent continuously watches collateral health and proposes protective adjustments: trimming size or requesting more margin as health drops, tightening or loosening a trailing exit as price trends, adjusting effective leverage against volatility. Every proposal is a signed action the circuit verifies against the position's real, hidden state before it executes — the agent can suggest a protective move, but it cannot fabricate collateral health, move funds outside what's authorized, or force an action the position doesn't actually warrant.
+- **Spot dark pool** — hidden limit orders rest as Poseidon commitments, match at a
+  contract-enforced midpoint, and settle into shielded STRK20 notes. With no opposing order, the
+  design falls back to an Ekubo swap (unshield → swap → reshield) so a trade completes.
+- **Perpetuals** — leveraged long/short (2x / 5x / 10x), with size, entry, margin, leverage and
+  PnL shielded; settlement through shielded notes.
+- **Agent risk layer** — the one agentic piece. For each open position the agent watches
+  collateral health and proposes protective moves (add margin, trim size, lower leverage, close).
+  Every proposal is a signed action the **contract** verifies against the position's real state
+  and the agent's registered policy before it executes.
 
-## What's public vs. shielded
+## How the agent sees a hidden position (the viewing-key delegation model)
 
-- **Public:** agent identity, action type (adjust margin / trim size / close), timestamp, order-book boolean flags.
-- **Shielded:** order size, price, leverage, margin, PnL, exit trigger levels.
+Positions are hidden **from the public and from other market participants — not from the agent
+that protects them.** This is a deliberate, documented trust boundary, the same shape as a
+fraud-detection system seeing transactions the public cannot.
 
-## Why this is a fair "first on Starknet" claim, not an overclaim
+- STRK20's viewing system is built on **ECDH on the STARK curve** (the scheme it uses for
+  channels and the auditor escrow). STRK20 documents two viewing paths — the owner's self-view
+  and a single whole-key escrow to a governance-fixed **auditor** — but **no** native call for an
+  owner to grant *a chosen third party* scoped view of *one* position.
+- MarginGuard builds that grant at the **application level, on STRK20's own ECDH primitive** (no
+  invented cryptography): the agent registers a viewing public key; when the owner opens a
+  position, they ECDH-encrypt the position's viewing capability to the agent's key and record the
+  grant on-chain (ephemeral pubkey + ciphertext, exactly like STRK20's channel/auditor records).
+  The agent decrypts off-chain and computes health from the real numbers.
+- The grant is **revocable**. The owner can revoke the agent's view, and the Privacy Center in
+  the UI shows every active grant.
 
-Dynamic risk management for perps is a mature, common pattern elsewhere (Hyperliquid, SynFutures-adjacent tooling) — this isn't a new job for an agent to do. What's new is doing it over a position nobody else can see, on Starknet specifically, where STRK20's shielded notes make the position private and Starknet's own Account Abstraction and session-key infrastructure (and its live "Chance" agent-transaction-verification system) make policy-bound agent execution a first-class, supported pattern rather than a bolt-on.
+This is precisely **IDEA-21 (Selective disclosure tooling)** — an organizer-listed, no-warning
+idea — built on STRK20's real primitive. It is documented throughout as an app-level
+construction, never as a native STRK20 "delegate" call, because that call does not exist.
 
-## Architecture
+## Agent verification flow — propose, verify, enforce
 
-- Order/position commitment hashing in Cairo, consistent with STRK20's native Poseidon-based note scheme
-- Agent registry contract: register key, verify signature on every proposed adjustment
-- Shared order book mapping: live/matched flags only
-- Two settlement modules: spot (token-for-token, with Ekubo fallback) and perps (margin/PnL against shielded notes)
-- Risk-adjustment verification: circuit checks the agent's signature and checks the proposed action against the position's actual shielded state before executing
-- STRK20 shielded notes throughout; viewing keys available for selective disclosure
+1. The agent observes the position (via its granted viewing key, off-chain).
+2. It creates and **signs** a proposal (STARK-curve signature).
+3. The proposal is submitted on-chain.
+4. The **contract** verifies: registered & active agent, valid signature over the exact proposal,
+   the revealed position matches its commitment, the proposal is within the agent's policy, and
+   the nonce is fresh — then **burns the nonce** so it can't be replayed.
+5. The contract enforces the effect and re-commits the position under a fresh salt.
 
-## Why this fits the judging criteria
+The agent supplies only a signature. It holds no funds, writes no state directly, and cannot
+push a position past its policy — **a compromised agent key is survivable.**
 
-- **STRK20 integration depth (30%)** — shielded notes across two settlement types, a real anonymizer-pattern Ekubo fallback, native Poseidon commitment scheme.
-- **Working mainnet product (30%)** — spot ships first as a capital-light, fully working checkpoint; perps and the risk agent layer on top.
-- **Innovation (25%)** — honest framing: agent-managed risk isn't new, doing it over a shielded position is. First on Starknet, not first anywhere.
-- **Documentation (15%)** — README diagrams the agent-verification flow, states the shielded/public split plainly, includes a real mainnet transaction from a working demo.
+## Public vs. shielded
+
+| | |
+| --- | --- |
+| **Public** | Agent identity, action type, timestamp; order/position existence, matched/settled flags; the market (token pair); and — once a leg settles — the settlement amount (an open-note amount is plaintext by protocol). |
+| **Shielded** (from the public and other traders; visible to the owner, and to the agent where granted) | Trade size, price; position size, margin, leverage, entry, PnL, liquidation threshold, exit triggers. |
+
+The honest one-line claim: **who is trading is never revealed, and what a resting order was
+stays hidden until it trades.** That is real pre-trade opacity — the definition of a dark pool.
+
+## Live deployment (Sepolia)
+
+| Contract | Address |
+| --- | --- |
+| AgentRegistry | `0x03ed6b59a2eb92151f4bb1c86764b877851e193c0219b36ebbf4a4b2bfd5bdb8` |
+| OrderBook | `0x03a7be95529ca4c28271bd4b017d582a14f799dec47696495ce6e10b698e8bb0` |
+| MarginGuardVenue | `0x05c10c42f661b328c6f75a1acba641029b9080938c50922de1c79beacb2f8a4f` |
+| STRK20 pool (pinned) | `0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91` |
+
+Verified on-chain: `venue.privacy_pool()` returns the pool and `book.venue()` returns the venue.
+Mainnet deployment uses the same `scripts/deploy/deploy_sjs.mjs` with the mainnet RPC and pool.
+
+## How this maps to the sprint ideas
+
+- **IDEA-07 · Confidential RFQ for block trades** — closest published match for the dark-pool
+  matching engine (no warning).
+- **IDEA-08 · Professional trading terminal** — the combined spot + perps + agent dashboard
+  framing (no warning).
+- **IDEA-21 · Selective disclosure tooling** — the owner→agent viewing grant (no warning).
+- **IDEA-02 · Private perpetuals** — cited as *motivation* for the agent-verified risk layer,
+  not as architecture (MarginGuard is a native venue, not an aggregator).
+
+Deliberately **not** anchored to IDEA-04 or IDEA-06 — both carry the organizers'
+"(not shipped yet: confidential compute)" warning.
+
+## Honest limitations
+
+Stated here and in [SECURITY_ASSUMPTIONS.md](docs/SECURITY_ASSUMPTIONS.md):
+
+- **Open-note amounts are public.** Settlement amounts and PnL are plaintext by STRK20 design.
+- **Reveal at action.** Matching, closing, liquidating and adjusting reveal the relevant values
+  to the contract at that moment (no user circuit, C2). Pre-trade/pre-action they are shielded;
+  ownership stays hidden throughout.
+- **Exit triggers are not timing-attack resistant.** Stop-loss / take-profit trigger values are
+  hidden from public view and other participants via the viewing-key mechanism — but an observer
+  watching *when* the agent submits a close can still infer approximate trigger timing.
+  Full protection would require confidential-compute infrastructure that does not yet exist on
+  STRK20. This is described precisely as "hidden from public view and other market participants,"
+  never as fully confidential.
+- **Not audited.** A fund-holding anonymizer warrants an independent audit before real value.
+
+## Repository
+
+```
+contracts/   Cairo contracts + tests (scarb build, scarb cairo-test — 96 tests)
+scripts/     signature vectors, pool discovery, deploy (starkli + starknet.js)
+src/         Next.js frontend, wired to the Sepolia deployment
+docs/        ARCHITECTURE_REPORT · ARCHITECTURE · DEPLOYMENT · SECURITY_ASSUMPTIONS · ADDRESSES
+```
+
+Docs: [Architecture report (Phase 0)](docs/ARCHITECTURE_REPORT.md) ·
+[Architecture](docs/ARCHITECTURE.md) · [Deployment](docs/DEPLOYMENT.md) ·
+[Security assumptions](docs/SECURITY_ASSUMPTIONS.md) · [Addresses](docs/ADDRESSES.md)

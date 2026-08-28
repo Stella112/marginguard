@@ -21,12 +21,23 @@
     },
     "mainnet": {
       "strk20_pool": "0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",
-      "note": "Pool address established from chain (see docs/ADDRESSES.md). Full-system mainnet deploy uses the same scripts/deploy/deploy_full_sjs.mjs with the mainnet RPC + pool.",
-      "verified_private_invoke_transactions": [
-        "0x1d6dc36e95456923d773b7d2f381ea7557ecdbbdf5a8b1807113c5d80646ba4",
-        "0x4e9bdb6368afb6ae8613e994361acb7737cf48ef0fe6dd1525cc30f0c6820a3",
-        "0x7f96fbdf92b465b97286f95dc9c2553d2af557ca8e3b2cbe67acb3acf211f51"
-      ]
+      "deployed": "2026-08-28",
+      "contracts": {
+        "AgentRegistry": "0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608",
+        "EkuboTwapOracle": "0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7",
+        "PerpEngine": "0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983",
+        "OrderBook": "0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c",
+        "MarginGuardVenue": "0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0"
+      },
+      "ekubo_oracle_extension": "0x005e470ff654d834983a46b8f29dfa99963d5044b993cb7b9c92243a69dab38f",
+      "twap_period_seconds": 1800,
+      "deploy_transactions": [
+        "0x58f6c9a7ae8cb728ae3f9671ad20673c07810e3e43b770aeea3c48ec9521df4",
+        "0x659d7ce9cd26830bc1c36977e5b0757351f1c81fe87d6522392d54386dab3a3",
+        "0x3ef1fb374375cd6146ea605dd2937ecca54e5b690bcf33d843efb2e8227932e",
+        "0x6d12e0d8cb4f6e06f0fc6647f92c6c499cc7e3db489e32cab713a324639e885"
+      ],
+      "note": "Full system live on mainnet with the real Ekubo TWAP oracle; perp.oracle().get_price(STRK,USDC) returns a live price."
     }
   },
   "demo_video": "",

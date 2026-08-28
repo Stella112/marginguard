@@ -1,0 +1,10 @@
+
+============ DEPLOYED — FULL (MAINNET) ============
+AgentRegistry    : 0x68aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608
+EkuboTwapOracle  : 0x45ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7
+PerpEngine       : 0x2c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983
+OrderBook        : 0x3cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c
+MarginGuardVenue : 0x1add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0
+privacy pool     : 0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a
+ekubo oracle     : 0x005e470ff654d834983a46b8f29dfa99963d5044b993cb7b9c92243a69dab38f (TWAP 1800s)
+==================================================

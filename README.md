@@ -82,17 +82,23 @@ push a position past its policy — **a compromised agent key is survivable.**
 The honest one-line claim: **who is trading is never revealed, and what a resting order was
 stays hidden until it trades.** That is real pre-trade opacity — the definition of a dark pool.
 
-## Live deployment (Sepolia)
+## Live deployment (Starknet MAINNET)
 
-| Contract | Address |
+Full system, deployed 2026-08-28 with the **real Ekubo TWAP oracle**. Every binding verified
+on-chain, and `PerpEngine → EkuboTwapOracle → Ekubo` returns a live STRK/USDC price.
+
+| Contract | Mainnet address |
 | --- | --- |
-| AgentRegistry | `0x03ed6b59a2eb92151f4bb1c86764b877851e193c0219b36ebbf4a4b2bfd5bdb8` |
-| OrderBook | `0x03a7be95529ca4c28271bd4b017d582a14f799dec47696495ce6e10b698e8bb0` |
-| MarginGuardVenue | `0x05c10c42f661b328c6f75a1acba641029b9080938c50922de1c79beacb2f8a4f` |
-| STRK20 pool (pinned) | `0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91` |
+| AgentRegistry | `0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608` |
+| EkuboTwapOracle | `0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7` |
+| PerpEngine | `0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983` |
+| OrderBook | `0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c` |
+| MarginGuardVenue | `0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0` |
+| STRK20 pool (pinned) | `0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
 
-Verified on-chain: `venue.privacy_pool()` returns the pool and `book.venue()` returns the venue.
-Mainnet deployment uses the same `scripts/deploy/deploy_sjs.mjs` with the mainnet RPC and pool.
+Full address + transaction list in [docs/ADDRESSES.md](docs/ADDRESSES.md). A prior full deploy is
+also live on Sepolia (recorded there). The oracle is the verified Ekubo extension
+`0x005e470f…dab38f` over a 30-min TWAP.
 
 ## How this maps to the sprint ideas
 

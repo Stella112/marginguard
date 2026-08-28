@@ -6,20 +6,23 @@
 
 import { RpcProvider, hash, shortString, num, ec } from "starknet";
 
-// ─── Sepolia deployment (live, verified on-chain 2026-08-27) ────────────────
-export const SEPOLIA_RPC = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_8";
+// ─── MAINNET deployment (full system, verified on-chain 2026-08-28) ─────────
+export const SEPOLIA_RPC = "https://rpc.starknet.lava.build"; // mainnet (name kept for callers)
 
-// Full-system deployment (spot + perps + agent + oracle), verified on-chain 2026-08-27.
 export const MG = {
-  agentRegistry: "0x064a7c3a09c040fa119990ce0a849e0451e134155389b4debd9fd535319aa487",
-  oracle: "0x07cb6c35ab8313f2ce9bbe3427504f72fa57288f1180c68af1416567f2673a14",
-  perpEngine: "0x00579523cbadd6a1228f66ba0265fa86dacf8d2239c0c685ad236860da78a3c5",
-  orderBook: "0x071960e31d69f11e7a9342124d60b019bce57b8f848174c2a079b509c40aec61",
-  venue: "0x04c5575b5342aca8a6bce5199e3bfeb70ace94670985dfc21b0120224a0b056e",
-  pool: "0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91",
+  agentRegistry: "0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608",
+  oracle: "0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7",
+  perpEngine: "0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983",
+  orderBook: "0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c",
+  venue: "0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0",
+  pool: "0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",
 } as const;
 
-export const VOYAGER = "https://sepolia.voyager.online/contract/";
+// Real STRK/USDC for the mainnet oracle read on the terminal.
+export const MARK_BASE = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d"; // STRK
+export const MARK_QUOTE = "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8"; // USDC
+
+export const VOYAGER = "https://voyager.online/contract/";
 
 // ─── Commitment scheme (must match commitments.cairo) ───────────────────────
 const ORDER_TAG = shortString.encodeShortString("MG_ORDER_COMMIT:V1");
@@ -240,11 +243,12 @@ export async function readAgentViewingKey(agent: string): Promise<string> {
   return vk;
 }
 
-/** Live mark price from the deployed oracle (scaled 1e18 → number). */
+/** Live STRK/USDC mark price from the deployed EkuboTwapOracle, in human USDC per STRK. */
 export async function readMarkPrice(): Promise<number> {
-  // get_price(base, quote); ManualOracle ignores the args and returns the set price.
-  const r = await call(MG.oracle, "get_price", [MG.pool, MG.pool]);
-  return Number(BigInt(r[0])) / 1e18;
+  const r = await call(MG.oracle, "get_price", [MARK_BASE, MARK_QUOTE]);
+  // Oracle returns quote-smallest per base-smallest × 1e18. STRK 18dp, USDC 6dp:
+  // human = value / 1e18 × 10^(18-6) = value / 1e6.
+  return Number(BigInt(r[0])) / 1e6;
 }
 
 export type PositionView = {

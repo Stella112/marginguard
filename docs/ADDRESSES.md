@@ -2,6 +2,28 @@
 
 Everything here was checked against the chain, not copied from documentation.
 
+## MarginGuard — MAINNET deployment (FULL system, live)
+
+Deployed 2026-08-28 via `scripts/deploy/deploy_mainnet.mjs`. Every binding verified on-chain,
+and the **real Ekubo TWAP oracle returns a live STRK/USDC price** through the perp engine
+(`EkuboTwapOracle.get_price(STRK, USDC)` → ~0.077 USDC/STRK at deploy time).
+
+| Contract | Mainnet address |
+| --- | --- |
+| AgentRegistry | `0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608` |
+| EkuboTwapOracle | `0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7` |
+| PerpEngine | `0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983` |
+| OrderBook | `0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c` |
+| MarginGuardVenue | `0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0` |
+| STRK20 pool (mainnet) | `0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
+| Ekubo oracle extension | `0x005e470ff654d834983a46b8f29dfa99963d5044b993cb7b9c92243a69dab38f` (TWAP 1800s) |
+
+Deploy account (single-signer OZ): `0x01ba464d9a5855984c58fa851179775963271681d1627945e6e13b0d77e3b097`
+Account deploy tx: `0x58f6c9a7ae8cb728ae3f9671ad20673c07810e3e43b770aeea3c48ec9521df4`
+Wiring txs: `0x659d7ce9cd26830bc1c36977e5b0757351f1c81fe87d6522392d54386dab3a3`,
+`0x3ef1fb374375cd6146ea605dd2937ecca54e5b690bcf33d843efb2e8227932e`,
+`0x6d12e0d8cb4f6e06f0fc6647f92c6c499cc7e3db489e32cab713a324639e885`.
+
 ## MarginGuard — Sepolia deployment (FULL system, live)
 
 Deployed 2026-08-27 via `scripts/deploy/deploy_full_sjs.mjs` (starknet.js v10.4.0). All five

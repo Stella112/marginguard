@@ -13,7 +13,7 @@
  */
 
 import { readFileSync, writeFileSync } from "fs"
-import { RpcProvider, Account, CallData, shortString } from "starknet"
+import { RpcProvider, Account, CallData, shortString, hash } from "starknet"
 import { decryptKeystore } from "./lib_keystore.mjs"
 
 const RPC = process.env.STARKNET_RPC || "https://rpc.starknet.lava.build"
@@ -39,10 +39,18 @@ function artifacts(name) {
 
 const provider = new RpcProvider({ nodeUrl: RPC })
 const accJson = JSON.parse(readFileSync(ACCOUNT, "utf8"))
-const account = new Account({ provider, address: accJson.deployment.address, signer: decryptKeystore(KEYSTORE, PASSWORD) })
+// The account was deployed via starknet.js, which doesn't write the address back into the
+// starkli json, so compute it from the deployment params when absent.
+const address = accJson.deployment.address || hash.calculateContractAddressFromHash(
+  accJson.deployment.salt,
+  accJson.deployment.class_hash,
+  [accJson.variant.public_key],
+  0,
+)
+const account = new Account({ provider, address, signer: decryptKeystore(KEYSTORE, PASSWORD) })
 
 console.log(`RPC     : ${RPC}`)
-console.log(`account : ${accJson.deployment.address}`)
+console.log(`account : ${address}`)
 console.log(`pragma  : ${PRAGMA} (STRK/USD)\n`)
 
 async function declare(name) {

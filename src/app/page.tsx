@@ -29,6 +29,14 @@ import {
 
 const SCALE = 10n ** 18n;
 
+/** Price with precision that adapts to magnitude (more decimals for sub-dollar assets). */
+function fmtPrice(p: number): string {
+  if (!p) return "—";
+  if (p >= 100) return p.toFixed(2);
+  if (p >= 1) return p.toFixed(3);
+  return p.toFixed(5);
+}
+
 // ─── Synthetic candles (illustrative), ending at the live mark ──────────────
 function candles(mark: number, n = 52) {
   let seed = 20260827;
@@ -111,7 +119,7 @@ function ShieldedBook({ mark }: { mark: number }) {
         <div className={s.bookRows}>
           {rows("ask")}
           <div className={s.bookMid}>
-            <span className={s.up}>{mark ? mark.toFixed(2) : "—"}</span>
+            <span className={s.up}>{fmtPrice(mark)}</span>
             <span className={s.muted} style={{ fontSize: 11, fontWeight: 400 }}>midpoint</span>
           </div>
           {rows("bid")}
@@ -187,7 +195,7 @@ function TradePanel({ mark }: { mark: number }) {
         <div className={s.privacyPreview}>
           <div className={`${s.previewRow} ${s.previewShielded}`}>
             <span className={s.previewLabel}><span className={s.lock}>🔒</span> entry / size / margin / lev</span>
-            <span className={s.mono}>{entry.toFixed(0)} / {sizeN} / {margin.toFixed(0)} / {lev}x</span>
+            <span className={s.mono}>{fmtPrice(entry)} / {sizeN} / {margin.toFixed(2)} / {lev}x</span>
           </div>
           <div className={`${s.previewRow} ${s.previewShielded}`}>
             <span className={s.previewLabel}><span className={s.lock}>🔒</span> shielded — off chain</span>
@@ -439,7 +447,7 @@ export default function Page() {
       <div className={s.stats}>
         <div className={s.stat}>
           <span className={s.statLabel}>Mark (oracle)</span>
-          <span className={`${s.statValue} ${s.markBig} ${s.mono} ${s.up}`}>{mark ? mark.toFixed(2) : "—"}</span>
+          <span className={`${s.statValue} ${s.markBig} ${s.mono} ${s.up}`}>{fmtPrice(mark)}</span>
         </div>
         <div className={s.stat}><span className={s.statLabel}>24h</span><span className={`${s.statValue} ${s.mono} ${s.up}`}>+{change}%</span></div>
         <div className={s.stat}><span className={s.statLabel}>Maint. margin</span><span className={`${s.statValue} ${s.mono}`}>50%</span></div>

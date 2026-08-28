@@ -390,7 +390,7 @@ function ContractsTab({ status }: { status: VenueStatus | null }) {
   ];
   return (
     <div>
-      <p className={s.cardTitle}>Live on Starknet Sepolia</p>
+      <p className={s.cardTitle}>Live on Starknet Mainnet</p>
       <div style={{ maxWidth: 640 }}>
         {rows.map(([n, a]) => (
           <div className={s.row} key={n}>
@@ -432,7 +432,7 @@ export default function Page() {
           <span className={`${s.tag} ${s.tagPrivate}`}>PRIVATE</span>
         </div>
         <div className={s.spacer} />
-        <div className={s.netpill}><span className={s.netLive} /> Sepolia · live</div>
+        <div className={s.netpill}><span className={s.netLive} /> Mainnet · live</div>
         <SelectWallet variant="nav" />
       </div>
 

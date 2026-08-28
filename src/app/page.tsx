@@ -10,6 +10,7 @@ import {
   VOYAGER,
   SIDE_BUY,
   SIDE_SELL,
+  orderCommitment,
   positionCommitment,
   traderCommitment,
   randomFelt,
@@ -231,6 +232,93 @@ function TradePanel({ mark }: { mark: number }) {
   );
 }
 
+// ─── Spot panel (the dark-pool DEX) ─────────────────────────────────────────
+function SpotPanel({ mark }: { mark: number }) {
+  const isConnected = useStoreWallet((st) => st.isConnected);
+  const [side, setSide] = useState(SIDE_BUY);
+  const [price, setPrice] = useState("");
+  const [size, setSize] = useState("1000");
+  const [salt, setSalt] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  useEffect(() => {
+    setSalt(randomFelt());
+  }, []);
+  // Default the limit price to the live mark once it loads.
+  useEffect(() => {
+    if (mark && !price) setPrice(mark.toFixed(5));
+  }, [mark, price]);
+
+  const priceN = Number(price) || 0;
+  const sizeN = Number(size) || 0;
+  const commitment = salt
+    ? orderCommitment(side, BigInt(Math.round(priceN * 1e6)), BigInt(Math.round(sizeN)), salt)
+    : "…";
+
+  return (
+    <div className={s.col}>
+      <div className={s.panelHead}>Place order · dark pool</div>
+      <div className={s.trade}>
+        <div className={s.sideToggle}>
+          <button className={`${s.sideBtn} ${s.sideLong} ${side === SIDE_BUY ? s.on : ""}`} onClick={() => setSide(SIDE_BUY)}>
+            Buy
+          </button>
+          <button className={`${s.sideBtn} ${s.sideShort} ${side === SIDE_SELL ? s.on : ""}`} onClick={() => setSide(SIDE_SELL)}>
+            Sell
+          </button>
+        </div>
+
+        <div>
+          <div className={s.tradeLabel}><span>Limit price (USDC)</span><span className={s.mono}>mark {fmtPrice(mark)}</span></div>
+          <input className={s.tradeInput} value={price} onChange={(e) => setPrice(e.target.value)} />
+        </div>
+
+        <div>
+          <div className={s.tradeLabel}>
+            <span>Size (STRK)</span>
+            <span className={s.mono}>≈ ${(priceN * sizeN).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+          </div>
+          <input className={s.tradeInput} value={size} onChange={(e) => setSize(e.target.value)} />
+        </div>
+
+        <div className={s.privacyPreview}>
+          <div className={`${s.previewRow} ${s.previewShielded}`}>
+            <span className={s.previewLabel}><span className={s.lock}>🔒</span> side / price / size</span>
+            <span className={s.mono}>{side === SIDE_BUY ? "buy" : "sell"} / {price || "—"} / {sizeN}</span>
+          </div>
+          <div className={`${s.previewRow} ${s.previewPublic}`}>
+            <span className={s.previewLabel}>🌐 order commitment on chain</span>
+            <span className={s.mono}>{short(commitment)}</span>
+          </div>
+          <div className={`${s.previewRow} ${s.previewPublic}`}>
+            <span className={s.previewLabel}>🌐 public flags</span>
+            <span className={s.mono}>live=1 matched=0</span>
+          </div>
+        </div>
+
+        <button
+          className={`${s.placeBtn} ${side === SIDE_BUY ? s.placeLong : s.placeShort}`}
+          disabled={!isConnected}
+          onClick={() =>
+            setStatus(
+              isConnected
+                ? `Order commitment built (${short(commitment)}). It rests hidden until a matching counterparty crosses; full private placement funds through the STRK20 pool.`
+                : null,
+            )
+          }
+        >
+          {isConnected ? `${side === SIDE_BUY ? "Buy" : "Sell"} STRK (hidden)` : "Connect wallet"}
+        </button>
+
+        {status && <div className={`${s.status} ${s.statusInfo}`}>{status}</div>}
+        <p className={s.hint}>
+          A dark-pool order: only this commitment reaches the chain. Price and size stay hidden
+          until it matches at the midpoint — no one front-runs what they can&apos;t see.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Bottom tabs ────────────────────────────────────────────────────────────
 type Tab = "positions" | "agent" | "privacy" | "contracts";
 
@@ -415,10 +503,13 @@ function ContractsTab({ status }: { status: VenueStatus | null }) {
   );
 }
 
+type Mode = "spot" | "perps";
+
 export default function Page() {
   const [mark, setMark] = useState(0);
   const [status, setStatus] = useState<VenueStatus | null>(null);
   const [tab, setTab] = useState<Tab>("positions");
+  const [mode, setMode] = useState<Mode>("spot");
 
   useEffect(() => {
     readMarkPrice().then(setMark).catch(() => setMark(1500));
@@ -436,8 +527,16 @@ export default function Page() {
         </div>
         <div className={s.market}>
           <span className={s.marketPair}>STRK-USDC</span>
-          <span className={s.tag}>PERP</span>
+          <span className={s.tag}>{mode === "spot" ? "SPOT" : "PERP"}</span>
           <span className={`${s.tag} ${s.tagPrivate}`}>PRIVATE</span>
+        </div>
+        <div className={s.seg}>
+          <button className={`${s.segBtn} ${mode === "spot" ? s.segBtnOn : ""}`} onClick={() => setMode("spot")}>
+            Spot · Dark Pool
+          </button>
+          <button className={`${s.segBtn} ${mode === "perps" ? s.segBtnOn : ""}`} onClick={() => setMode("perps")}>
+            Perps
+          </button>
         </div>
         <div className={s.spacer} />
         <div className={s.netpill}><span className={s.netLive} /> Mainnet · live</div>
@@ -465,7 +564,7 @@ export default function Page() {
           </div>
         </div>
         <ShieldedBook mark={mark || 1500} />
-        <TradePanel mark={mark} />
+        {mode === "spot" ? <SpotPanel mark={mark} /> : <TradePanel mark={mark} />}
       </div>
 
       <div className={s.bottom}>

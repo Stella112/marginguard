@@ -23,14 +23,14 @@
       "strk20_pool": "0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",
       "deployed": "2026-08-28",
       "contracts": {
-        "AgentRegistry": "0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608",
-        "EkuboTwapOracle": "0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7",
-        "PerpEngine": "0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983",
+        "AgentRegistry": "0x05b99dcb0d9995a112c1e12ea1695247a43811f586513027bb6d1057bc673e55",
+        "PragmaOracle": "0x038d443ba8d1bc4dc914ff2aadf9acbd3c0785c376b66986c7e7520090f5c1af",
+        "PerpEngine": "0x00aaa439cf40d1d535e7d58245443461fbff2ce7ed272b441cc09683a741354c",
         "OrderBook": "0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c",
         "MarginGuardVenue": "0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0"
       },
-      "ekubo_oracle_extension": "0x005e470ff654d834983a46b8f29dfa99963d5044b993cb7b9c92243a69dab38f",
-      "twap_period_seconds": 1800,
+      "oracle": "Pragma STRK/USD (0x2a85bd6...) via PragmaOracle adapter; returns live ~$0.0248",
+      "note_oracle_swap": "First deploy used an Ekubo TWAP adapter, but its extension pool reads ~3x off; swapped to Pragma. Superseded: PerpEngine 0x02c61d3c..., EkuboTwapOracle 0x045ec9d0..., AgentRegistry 0x068aba2f...",
       "deploy_transactions": [
         "0x58f6c9a7ae8cb728ae3f9671ad20673c07810e3e43b770aeea3c48ec9521df4",
         "0x659d7ce9cd26830bc1c36977e5b0757351f1c81fe87d6522392d54386dab3a3",

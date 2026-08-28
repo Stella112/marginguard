@@ -10,13 +10,21 @@ and the **real Ekubo TWAP oracle returns a live STRK/USDC price** through the pe
 
 | Contract | Mainnet address |
 | --- | --- |
-| AgentRegistry | `0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608` |
-| EkuboTwapOracle | `0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7` |
-| PerpEngine | `0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983` |
+| AgentRegistry | `0x05b99dcb0d9995a112c1e12ea1695247a43811f586513027bb6d1057bc673e55` |
+| **PragmaOracle** | `0x038d443ba8d1bc4dc914ff2aadf9acbd3c0785c376b66986c7e7520090f5c1af` |
+| PerpEngine | `0x00aaa439cf40d1d535e7d58245443461fbff2ce7ed272b441cc09683a741354c` |
 | OrderBook | `0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c` |
 | MarginGuardVenue | `0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0` |
 | STRK20 pool (mainnet) | `0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
-| Ekubo oracle extension | `0x005e470ff654d834983a46b8f29dfa99963d5044b993cb7b9c92243a69dab38f` (TWAP 1800s) |
+| Pragma oracle (source) | `0x2a85bd616f912537c50a49a4076db02c00b29b2cdc8a197ce92ed1837fa875b` (STRK/USD) |
+
+> **Oracle swapped to Pragma.** The first mainnet deploy used an Ekubo TWAP adapter, but its
+> oracle-extension pool reads ~3x above the real market (thin, un-arbitraged pools). Verified
+> against Pragma (11 sources, matches CEX). The oracle was swapped to `PragmaOracle`, which
+> required redeploying the perp engine + agent registry (their oracle/executor bindings are
+> immutable). `PerpEngine.oracle().get_price(STRK, USDC)` now returns the real ~$0.0248.
+> Superseded (still on-chain): AgentRegistry `0x068aba2f…4e608`, EkuboTwapOracle `0x045ec9d0…92e0d7`,
+> PerpEngine `0x02c61d3c…352983`.
 
 Deploy account (single-signer OZ): `0x01ba464d9a5855984c58fa851179775963271681d1627945e6e13b0d77e3b097`
 Account deploy tx: `0x58f6c9a7ae8cb728ae3f9671ad20673c07810e3e43b770aeea3c48ec9521df4`

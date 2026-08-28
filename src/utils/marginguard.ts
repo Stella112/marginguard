@@ -9,10 +9,11 @@ import { RpcProvider, hash, shortString, num, ec } from "starknet";
 // ─── MAINNET deployment (full system, verified on-chain 2026-08-28) ─────────
 export const SEPOLIA_RPC = "https://rpc.starknet.lava.build"; // mainnet (name kept for callers)
 
+// Oracle swapped Ekubo (thin, ~3x off) -> Pragma (accurate); perp + registry redeployed.
 export const MG = {
-  agentRegistry: "0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608",
-  oracle: "0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7",
-  perpEngine: "0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983",
+  agentRegistry: "0x05b99dcb0d9995a112c1e12ea1695247a43811f586513027bb6d1057bc673e55",
+  oracle: "0x038d443ba8d1bc4dc914ff2aadf9acbd3c0785c376b66986c7e7520090f5c1af",
+  perpEngine: "0x00aaa439cf40d1d535e7d58245443461fbff2ce7ed272b441cc09683a741354c",
   orderBook: "0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c",
   venue: "0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0",
   pool: "0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",

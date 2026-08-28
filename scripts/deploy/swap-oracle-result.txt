@@ -1,0 +1,7 @@
+
+======== ORACLE SWAP — MAINNET (Pragma) ========
+PragmaOracle   : 0x38d443ba8d1bc4dc914ff2aadf9acbd3c0785c376b66986c7e7520090f5c1af
+PerpEngine     : 0xaaa439cf40d1d535e7d58245443461fbff2ce7ed272b441cc09683a741354c   (new, Pragma-fed)
+AgentRegistry  : 0x5b99dcb0d9995a112c1e12ea1695247a43811f586513027bb6d1057bc673e55   (new, bound to new perp)
+OrderBook / MarginGuardVenue: unchanged
+================================================

@@ -27,6 +27,7 @@ pub mod oracle;
 pub mod perp;
 pub mod oracle_manual;
 pub mod oracle_ekubo;
+pub mod oracle_pragma;
 
 #[cfg(test)]
 mod tests;

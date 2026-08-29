@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import c from "./landing.module.css";
-import { MG, VOYAGER, readMarkPrice } from "@/utils/marginguard";
+import { MG, VOYAGER } from "@/utils/marginguard";
 
 const fadeUp = {
   initial: { opacity: 0, y: 26 },
@@ -12,17 +11,7 @@ const fadeUp = {
   transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const },
 };
 
-function price(p: number): string {
-  if (!p) return "—";
-  return p < 1 ? p.toFixed(5) : p.toFixed(2);
-}
-
 export default function Landing() {
-  const [mark, setMark] = useState(0);
-  useEffect(() => {
-    readMarkPrice().then(setMark).catch(() => {});
-  }, []);
-
   return (
     <div className={c.page}>
       <nav className={c.nav}>
@@ -30,48 +19,69 @@ export default function Landing() {
           <span className={c.brandDot} />
           Margin<span className={c.brandMark}>Guard</span>
         </div>
+        <div className={c.navCenter}>
+          <a className={c.navLink} href="#protocol">Protocol</a>
+          <a className={c.navLink} href="#privacy">Privacy</a>
+          <a className={c.navLink} href="#security">Security</a>
+        </div>
         <div className={c.navRight}>
           <a className={c.navLink} href="https://github.com/Stella112/marginguard" target="_blank" rel="noreferrer">GitHub</a>
-          <a className={c.navCta} href="/trade">Launch Terminal →</a>
+          <a className={c.navCta} href="/trade">Launch Terminal</a>
         </div>
       </nav>
 
       {/* Hero */}
       <header className={c.hero}>
-        <div className={c.grid3d} />
-        <motion.div className={`${c.orb} ${c.orb1}`} animate={{ x: [0, 40, 0], y: [0, 30, 0] }} transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }} />
-        <motion.div className={`${c.orb} ${c.orb2}`} animate={{ x: [0, -50, 0], y: [0, -20, 0] }} transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }} />
+        <div className={c.heroGrid}>
+          <div className={c.heroCopy}>
+            <motion.div className={c.livePill} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+              <span className={c.liveDot} /> Starknet mainnet · SN_MAIN
+            </motion.div>
 
-        <motion.div className={c.livePill} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <span className={c.liveDot} /> Live on Starknet Mainnet
-        </motion.div>
+            <motion.h1 className={c.h1} initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}>
+              Trade without
+              <br />
+              <span className={c.accent}>showing your hand.</span>
+            </motion.h1>
 
-        <motion.h1 className={c.h1} initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}>
-          Trade in the dark.
-          <br />
-          <span className={c.accent}>Verified in the open.</span>
-        </motion.h1>
+            <motion.p className={c.sub} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.7, delay: 0.35 }}>
+              A private spot and perpetuals venue for Starknet. STRK20 shields the settlement;
+              Cairo verifies every action that can touch your position.
+            </motion.p>
 
-        <motion.p className={c.sub} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.7, delay: 0.35 }}>
-          A private dark pool and perpetuals venue on Starknet, built on STRK20 shielded notes.
-          Who is trading is never revealed. What a resting order was stays hidden until it trades.
-          An agent protects your position — and the contract checks its every move.
-        </motion.p>
+            <motion.div className={c.heroCtas} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.5 }}>
+              <a className={c.btnPrimary} href="/trade">Launch Terminal</a>
+              <a className={c.btnGhost} href="#protocol">Explore the protocol</a>
+            </motion.div>
+          </div>
 
-        <motion.div className={c.heroCtas} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.5 }}>
-          <a className={c.btnPrimary} href="/trade">Launch Terminal</a>
-          <a className={c.btnGhost} href="#how">See how it works</a>
-        </motion.div>
-
-        <motion.div className={c.ticker} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}>
-          <span className={c.mono} style={{ color: "#8a97ac" }}>STRK / USDC</span>
-          <span className={`${c.tickerPrice} ${c.mono}`}>${price(mark)}</span>
-          <span className={c.mono} style={{ color: "#5a6678", fontSize: 12 }}>live · Pragma oracle</span>
-        </motion.div>
+          <motion.div className={c.heroFrame} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8, delay: 0.25 }}>
+            <div className={c.frameHeader}><span>PRIVATE EXECUTION</span><span className={c.frameLive}><span className={c.liveDot} /> LIVE</span></div>
+            <div className={c.frameMain}>
+              <div className={c.frameKicker}>ORDER STATE</div>
+              <div className={c.frameTitle}>COMMITTED</div>
+              <div className={`${c.frameHash} ${c.mono}`}>0x2170c88c228d…a4ec41a</div>
+              <div className={c.frameRule} />
+              <div className={c.frameRows}>
+                <div><span>market</span><b>STRK / USDC</b></div>
+                <div><span>terms</span><b className={c.framePrivate}>shielded</b></div>
+                <div><span>settlement</span><b>STRK20 note</b></div>
+              </div>
+            </div>
+            <div className={c.frameFooter}><span>Poseidon commitment</span><span className={c.mono}>verified</span></div>
+          </motion.div>
+        </div>
       </header>
 
+      <div className={c.proofStrip}>
+        <div><span>01</span><b>Private matching</b><small>Orders reveal only when matched.</small></div>
+        <div><span>02</span><b>Shielded settlement</b><small>Native STRK20 notes.</small></div>
+        <div><span>03</span><b>Verified risk</b><small>Agent actions gated in Cairo.</small></div>
+        <div><span>04</span><b>Starknet mainnet</b><small>SN_MAIN · non-custodial.</small></div>
+      </div>
+
       {/* Problem */}
-      <section className={c.section} id="how">
+      <section className={c.section} id="protocol">
         <motion.div {...fadeUp}>
           <div className={c.kicker}>The problem</div>
           <h2 className={c.h2}>On a public order book, everyone sees your hand before you play it.</h2>
@@ -96,11 +106,11 @@ export default function Landing() {
         </motion.div>
         <motion.div className={c.transform} {...fadeUp}>
           <div className={c.plain}>
-            <span className={c.chip}>🔒 side: buy</span>
-            <span className={c.chip}>🔒 price: 0.0246</span>
-            <span className={c.chip}>🔒 size: 10,000</span>
+            <span className={c.chip}>SIDE / BUY</span>
+            <span className={c.chip}>PRICE / 0.0246</span>
+            <span className={c.chip}>SIZE / 10,000</span>
           </div>
-          <span className={c.arrowBig}>→</span>
+          <span className={c.arrowBig}>TO COMMITMENT</span>
           <div className={`${c.hashOut} ${c.mono}`}>0x2170c88c228d5f16362ea596c1f417c7bb16acd061fbd4bd96089392a4ec41a</div>
         </motion.div>
       </section>
@@ -113,12 +123,12 @@ export default function Landing() {
         </motion.div>
         <div className={c.cards}>
           {[
-            { icon: "🌑", title: "Spot dark pool", text: "Hidden limit orders, matched at a private midpoint, settled into shielded STRK20 notes. Deposit once, trade many — funding never links to an order." },
-            { icon: "📈", title: "Private perpetuals", text: "Leveraged long/short at 2x, 5x, 10x. Size, entry, margin, PnL and liquidation thresholds all shielded. Liquidations gated on a live Pragma oracle." },
-            { icon: "🛡️", title: "Agent-verified risk", text: "A registered agent watches each position and proposes protective moves — but the contract verifies identity, signature, policy and state before anything executes." },
+            { title: "Spot dark pool", text: "Hidden limit orders, matched at a private midpoint, settled into shielded STRK20 notes. Deposit once, trade many — funding never links to an order." },
+            { title: "Private perpetuals", text: "Leveraged long/short at 2x, 5x, 10x. Size, entry, margin, PnL and liquidation thresholds all shielded. Liquidations gated on a live Pragma oracle." },
+            { title: "Agent-verified risk", text: "A registered agent watches each position and proposes protective moves — but the contract verifies identity, signature, policy and state before anything executes." },
           ].map((x, i) => (
             <motion.div key={x.title} className={c.card} {...fadeUp} transition={{ ...fadeUp.transition, delay: i * 0.1 }}>
-              <div className={c.cardIcon}>{x.icon}</div>
+              <div className={c.cardIcon} aria-hidden="true" />
               <div className={c.cardTitle}>{x.title}</div>
               <div className={c.cardText}>{x.text}</div>
             </motion.div>
@@ -127,7 +137,7 @@ export default function Landing() {
       </section>
 
       {/* Agent flow */}
-      <section className={c.section}>
+      <section className={c.section} id="privacy">
         <motion.div {...fadeUp}>
           <div className={c.kicker}>The trust model</div>
           <h2 className={c.h2}>The agent proposes. The contract verifies. The contract enforces.</h2>
@@ -153,7 +163,7 @@ export default function Landing() {
       </section>
 
       {/* Viewing key */}
-      <section className={c.section}>
+      <section className={c.section} id="security">
         <motion.div {...fadeUp}>
           <div className={c.kicker}>Selective disclosure · IDEA-21</div>
           <h2 className={c.h2}>Hidden from the market. Visible to the guardian you choose.</h2>

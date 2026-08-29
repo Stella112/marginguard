@@ -9,7 +9,7 @@ alongside the threat model, which is in
 | # | We trust | We do NOT trust | Enforced by |
 | --- | --- | --- | --- |
 | 1 | The STRK20 privacy pool contract | — | It is StarkWare's, pinned by address |
-| 2 | The oracle for a fair time-weighted price | An instantaneous spot price | Ekubo **TWAP**, not spot (decision Q3) |
+| 2 | The oracle for a fair aggregated price | An instantaneous spot price | Pragma **STRK/USD median**, not spot |
 | 3 | Nothing about the agent's honesty | The agent's proposals, identity claim, or key | Contract re-verifies every proposal |
 | 4 | The caller to reveal *some* values | That the revealed values are true | Commitment re-derivation on every action |
 | 5 | The venue to hold funds mid-transaction | The venue to hold more than it was funded | Credited totals checked against real balance |
@@ -56,15 +56,11 @@ enforces, but the contract cannot judge whether a bound is wise.
 ## Oracle assumptions
 
 - The perp engine values positions, checks margin health, and gates liquidations on
-  `IPriceOracle.get_price`, expected to be an **Ekubo TWAP** on mainnet.
-- **Why TWAP, not spot:** a single-block spot push could otherwise trigger false liquidations. A
-  time-weighted read raises the cost of manipulation to sustaining a false price across the
-  window. This was an explicit decision (Q3 in the architecture report) over the brief's default
-  of Ekubo spot.
-- **Residual risk:** a TWAP still moves with a determined, well-capitalised manipulator over its
-  window, and it lags fast genuine moves. Liquidations are therefore correct with respect to the
-  *oracle*, which is the contract's only view of price — not necessarily with respect to an
-  instantaneous market. This is inherent to on-chain perps, not specific to MarginGuard.
+  `IPriceOracle.get_price`. The current mainnet deployment uses Pragma's aggregated STRK/USD
+  median; the older Ekubo adapter deployment is superseded.
+- **Residual risk:** an aggregated oracle can still be stale, wrong, or manipulated across its
+  source set. Liquidations are correct with respect to the oracle, which is the contract's only
+  view of price — not necessarily with respect to an instantaneous market.
 - The oracle is behind an interface, so it can be re-pointed or swapped (e.g. to Pragma) without
   touching position math.
 
@@ -125,11 +121,11 @@ Stated plainly, because a privacy claim is only worth what its limits admit.
 
 - **Deployment bindings are one-time and must be set right after deploy:** the book's
   `initialize_venue`, the registry's `initialize_executor`, and the engine's
-  `initialize_agent_registry`. Each is first-caller-wins and cannot be changed once set. The
-  deploy script performs the book/venue wiring; the registry/engine wiring is done in the perp
-  deployment pass. Until a binding is set, the dependent action is refused (fail-closed).
+  `initialize_agent_registry`. New builds restrict these calls to the deployment caller; existing
+  deployments made before this guard must be treated as superseded and should not hold value.
+  Until a binding is set, the dependent action is refused (fail-closed).
 - **Toolchain:** contracts are built with Scarb 2.18.0 (pinned) and tested with
-  `scarb cairo-test` (96 tests). Starknet Foundry has no current Windows build, so `snforge` is
+  `scarb cairo-test` (115 tests). Starknet Foundry has no current Windows build, so `snforge` is
   not used; the built-in runner covers the same ground.
 - **Not audited.** This is a hackathon build. An anonymizer contract that holds funds is exactly
   the kind of code that warrants an independent audit before any real value is entrusted to it.

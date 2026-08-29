@@ -15,6 +15,16 @@ pub enum Side {
 pub const SIDE_BUY: u8 = 0;
 pub const SIDE_SELL: u8 = 1;
 
+/// Returns true only for the two sides understood by the matching and perp engines.
+pub fn is_valid_side(raw: u8) -> bool {
+    raw == SIDE_BUY || raw == SIDE_SELL
+}
+
+/// MarginGuard deliberately supports a small, explicit leverage surface.
+pub fn is_supported_leverage(raw: u8) -> bool {
+    raw == 2 || raw == 5 || raw == 10
+}
+
 pub fn side_to_u8(side: Side) -> u8 {
     match side {
         Side::Buy => SIDE_BUY,

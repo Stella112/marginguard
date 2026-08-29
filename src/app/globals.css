@@ -91,14 +91,16 @@ body {
   overflow-x: hidden;
 }
 
-/* Redesigned app is committed to a single light "aurora" theme. */
+/* MarginGuard uses a dark protocol surface across the app. */
 html {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
-  color: #0b0a14;
-  background: #fbf7fd;
+  color: #ffffff;
+  background: #000000;
+  selection-background-color: #dba85a;
+  selection-color: #000000;
 }
 
 a {

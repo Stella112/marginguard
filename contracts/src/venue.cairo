@@ -119,6 +119,9 @@ pub mod errors {
     pub const PAYOUT_OVERFLOW: felt252 = 'PAYOUT_OVERFLOW';
     pub const ORDER_ALREADY_RESERVED: felt252 = 'ORDER_ALREADY_RESERVED';
     pub const WRONG_CLAIM_TOKEN: felt252 = 'WRONG_CLAIM_TOKEN';
+    pub const CREDIT_OVERFLOW: felt252 = 'CREDIT_OVERFLOW';
+    pub const INSUFFICIENT_RESERVE: felt252 = 'INSUFFICIENT_RESERVE';
+    pub const TOTAL_CREDITED_UNDERFLOW: felt252 = 'TOTAL_CREDITED_UNDERFLOW';
 }
 
 /// Fixed-point scale for `price`, expressed as quote units per one whole base unit.
@@ -301,14 +304,17 @@ pub mod MarginGuardVenue {
             assert(token.is_non_zero(), errors::ZERO_TOKEN);
             assert(amount.is_non_zero(), errors::ZERO_AMOUNT);
 
-            let credited = self.total_credited.read(token) + amount;
+            let credited_u256: u256 = self.total_credited.read(token).into() + amount.into();
+            let credited: u128 = credited_u256.try_into().expect(errors::CREDIT_OVERFLOW);
             let held: u256 = IErc20Dispatcher { contract_address: token }
                 .balance_of(get_contract_address());
             assert(held >= credited.into(), errors::UNDERFUNDED);
 
             self.total_credited.write(token, credited);
             let key = (trader_commitment, token);
-            self.balances.write(key, self.balances.read(key) + amount);
+            let balance_u256: u256 = self.balances.read(key).into() + amount.into();
+            let balance: u128 = balance_u256.try_into().expect(errors::CREDIT_OVERFLOW);
+            self.balances.write(key, balance);
 
             self.emit(Funded { trader_commitment, token, amount });
 
@@ -359,25 +365,32 @@ pub mod MarginGuardVenue {
                 (entry.quote_token, quote_amount(filled_size, fill_price))
             };
 
+            // A resting order may have reserved more than the matched fill. Return the unused
+            // portion to the same commitment balance instead of silently trapping it.
+            let trader_commitment = compute_trader_commitment(owner_secret);
+            let consumed = if side == SIDE_BUY {
+                payout_amount
+            } else {
+                filled_size
+            };
+            let reserved_token = self.reserved_token.read(order_id);
+            let reserved_amount = self.reserved_amount.read(order_id);
+            assert(reserved_amount >= consumed, errors::INSUFFICIENT_RESERVE);
+            let refund = reserved_amount - consumed;
+            if refund.is_non_zero() {
+                let balance_key = (trader_commitment, reserved_token);
+                let balance_u256: u256 = self.balances.read(balance_key).into() + refund.into();
+                let balance: u128 = balance_u256.try_into().expect(errors::CREDIT_OVERFLOW);
+                self.balances.write(balance_key, balance);
+            }
+
             self.claimed.write(order_id, true);
 
-            // Releasing the reserve keeps `total_credited` honest against the tokens that are
-            // about to leave the venue.
-            let reserved_token = self.reserved_token.read(order_id);
-            let reserved = self.reserved_amount.read(order_id);
-            if reserved.is_non_zero() {
-                let credited = self.total_credited.read(reserved_token);
-                self
-                    .total_credited
-                    .write(
-                        reserved_token,
-                        if credited > reserved {
-                            credited - reserved
-                        } else {
-                            0
-                        },
-                    );
-            }
+            // The token leaving the venue is the payout token, not necessarily the token the
+            // claimant reserved. Decrement the per-token ledger by the actual payout.
+            let credited = self.total_credited.read(payout_token);
+            assert(credited >= payout_amount, errors::TOTAL_CREDITED_UNDERFLOW);
+            self.total_credited.write(payout_token, credited - payout_amount);
 
             // Approve, do not transfer — the pool executes the pull itself (rule 2).
             IErc20Dispatcher { contract_address: payout_token }
@@ -399,4 +412,5 @@ pub mod MarginGuardVenue {
         let scaled: u256 = product / PRICE_SCALE;
         scaled.try_into().expect(errors::PAYOUT_OVERFLOW)
     }
+
 }

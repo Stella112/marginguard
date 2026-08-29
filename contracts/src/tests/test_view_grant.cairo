@@ -8,11 +8,13 @@
 
 use core::num::traits::Zero;
 use starknet::syscalls::deploy_syscall;
+use starknet::testing::{set_caller_address, set_contract_address};
 use starknet::{ContractAddress, SyscallResultTrait};
 
+use crate::agent_registry::{AgentRegistry, IAgentRegistryDispatcher, IAgentRegistryDispatcherTrait};
 use crate::commitments::{compute_position_commitment, compute_trader_commitment};
 use crate::perp::{IPerpEngineDispatcher, IPerpEngineDispatcherTrait, PerpEngine};
-use crate::types::SIDE_BUY;
+use crate::types::{AgentPolicy, SIDE_BUY};
 use super::mock_oracle::MockOracle;
 
 const SCALE: u128 = 1000000000000000000;
@@ -27,6 +29,7 @@ const SALT: felt252 = 'perp_salt';
 // on-chain they are opaque felts.
 const EPHEMERAL: felt252 = 'rG_ephemeral_pubkey';
 const CIPHERTEXT: felt252 = 'masked_capability';
+const AGENT_PUBLIC_KEY: felt252 = 0x1ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca;
 
 fn agent() -> ContractAddress {
     0xA9E17.try_into().unwrap()
@@ -49,6 +52,24 @@ fn setup() -> IPerpEngineDispatcher {
     )
         .unwrap_syscall();
     let perp = IPerpEngineDispatcher { contract_address: perp_addr };
+    let (registry_addr, _) = deploy_syscall(
+        AgentRegistry::TEST_CLASS_HASH.try_into().unwrap(), 0, array![].span(), false,
+    )
+        .unwrap_syscall();
+    perp.initialize_agent_registry(registry_addr);
+    let registry = IAgentRegistryDispatcher { contract_address: registry_addr };
+    set_contract_address(agent());
+    registry
+        .register_agent(
+            AGENT_PUBLIC_KEY,
+            AgentPolicy {
+                max_margin_increase_bps: 5000,
+                max_size_reduction_bps: 3000,
+                max_leverage: 5,
+                may_close: true,
+            },
+        );
+    set_caller_address(0.try_into().unwrap());
     perp
         .open_position(
             'p1',

@@ -91,6 +91,7 @@ pub mod errors {
     pub const CALLER_NOT_VENUE: felt252 = 'CALLER_NOT_VENUE';
     pub const VENUE_ALREADY_SET: felt252 = 'VENUE_ALREADY_SET';
     pub const ZERO_VENUE: felt252 = 'ZERO_VENUE';
+    pub const NOT_INITIALIZER: felt252 = 'NOT_INITIALIZER';
 }
 
 #[starknet::contract]
@@ -107,6 +108,8 @@ pub mod OrderBook {
 
     #[storage]
     struct Storage {
+        /// Deployment authority used only for the one-time venue binding.
+        initializer: ContractAddress,
         /// The venue permitted to place and cancel. Matching stays permissionless.
         venue: ContractAddress,
         orders: Map<felt252, OrderEntry>,
@@ -114,6 +117,11 @@ pub mod OrderBook {
         fill_price: Map<felt252, u128>,
         /// Filled size per matched order.
         fill_size: Map<felt252, u128>,
+    }
+
+    #[constructor]
+    fn constructor(ref self: ContractState) {
+        self.initializer.write(get_caller_address());
     }
 
     #[event]
@@ -285,6 +293,10 @@ pub mod OrderBook {
         }
 
         fn initialize_venue(ref self: ContractState, venue: ContractAddress) {
+            let initializer = self.initializer.read();
+            if initializer.is_non_zero() {
+                assert(get_caller_address() == initializer, errors::NOT_INITIALIZER);
+            }
             assert(venue.is_non_zero(), errors::ZERO_VENUE);
             assert(self.venue.read().is_zero(), errors::VENUE_ALREADY_SET);
             self.venue.write(venue);

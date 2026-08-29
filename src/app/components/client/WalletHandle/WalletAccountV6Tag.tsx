@@ -7,7 +7,6 @@ import styles from "../../../uni.module.css";
 import * as constants from "@/utils/constants";
 import { useStoreWallet } from "../../Wallet/walletContext";
 import { useFrontendProvider } from "../provider/providerContext";
-import { StrkCoin } from "../../TokenIcons";
 import SelectWallet from "./SelectWallet";
 
 // DEMO: all actions use one token (STRK). Swap constants.addrSTRK for your token,
@@ -84,7 +83,7 @@ function receiptToResult(txR: any, txH: string, amountLabel: string): ActionResu
   };
 }
 
-// Turn the shielded-balances response into a token → amount list.
+// Turn the raw shielded-balances response into a token and amount list.
 function balancesToResult(raw: any): ActionResult {
   const r = raw?.value ?? raw;
   const arr = Array.isArray(r) ? r : null;
@@ -453,7 +452,7 @@ export default function WalletAccountV6Tag() {
     >
       <div className={styles.receiptHead}>
         <span className={styles.receiptIcon}>
-          {r.status === "ok" ? "✓" : r.status === "error" ? "!" : "⋯"}
+          {r.status === "ok" ? "Success" : r.status === "error" ? "Error" : "Pending"}
         </span>
         <span>{r.title}</span>
       </div>
@@ -469,7 +468,7 @@ export default function WalletAccountV6Tag() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  {row.value} ↗
+                  {row.value}
                 </a>
               ) : (
                 <span className={styles.receiptValue}>{row.value}</span>
@@ -491,7 +490,7 @@ export default function WalletAccountV6Tag() {
     shield: { label: "You're shielding", value: "10", token: "STRK", hint: "Deposit into the privacy pool", cta: "Shield", onRun: handleShield, result: resultShield, disabled: !isStrk20Network },
     send: { label: "You're sending - to self", value: "1", token: "STRK", hint: "Private in-pool transfer", cta: "Self transfer", onRun: handleSelfTransfer, result: resultTransfer, disabled: !isStrk20Network },
     unshield: { label: "You're unshielding", value: "1", token: "STRK", hint: "Withdraw to your account", cta: "Unshield", onRun: handleUnshield, result: resultUnshield, disabled: !isStrk20Network },
-    echo: { label: "Echo invoke round-trip", value: "5", token: "STRK", hint: "Withdraw → helper → refill open note", cta: "Run echo", onRun: handleComplex, result: resultComplex, disabled: !isStrk20Network || !hasEchoHelper },
+    echo: { label: "Echo invoke round-trip", value: "5", token: "STRK", hint: "Withdraw, helper, refill open note", cta: "Run echo", onRun: handleComplex, result: resultComplex, disabled: !isStrk20Network || !hasEchoHelper },
     balances: { label: "Shielded balances", value: "All", token: "tokens", hint: "Read your private pool balances", cta: "Query balances", onRun: handleBalances, result: resultBalances, disabled: !isStrk20Network },
   };
   const active = CONFIG[tab];
@@ -517,9 +516,6 @@ export default function WalletAccountV6Tag() {
         <div className={styles.inputMain}>
           <div className={styles.bigValue}>{active.value}</div>
           <span className={styles.tokenPill}>
-            <span className={styles.tokenDot}>
-              <StrkCoin size={22} />
-            </span>
             {active.token}
           </span>
         </div>
@@ -579,12 +575,12 @@ export default function WalletAccountV6Tag() {
           }`}
         >
           <div className={styles.verdictHead}>
-            <span>{verdictComplex.pending ? "⏳" : verdictComplex.ok ? "✅" : "❌"}</span>
+            <span>{verdictComplex.pending ? "Pending" : verdictComplex.ok ? "Passed" : "Failed"}</span>
             {verdictComplex.title}
           </div>
           {verdictComplex.rows.map((row) => (
             <div key={row.label} className={styles.verdictRow}>
-              {row.ok !== undefined && <span>{row.ok ? "✅" : "❌"}</span>}
+              {row.ok !== undefined && <span>{row.ok ? "Passed" : "Failed"}</span>}
               <b>{row.label}:</b>
               <span>{row.value}</span>
             </div>

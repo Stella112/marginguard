@@ -37,7 +37,7 @@
         "0x3ef1fb374375cd6146ea605dd2937ecca54e5b690bcf33d843efb2e8227932e",
         "0x6d12e0d8cb4f6e06f0fc6647f92c6c499cc7e3db489e32cab713a324639e885"
       ],
-      "note": "Full system live on mainnet with the real Ekubo TWAP oracle; perp.oracle().get_price(STRK,USDC) returns a live price."
+      "note": "Current mainnet system uses the Pragma STRK/USD median oracle. The perp engine is an accounting prototype; collateral custody is not yet atomic with position opening."
     }
   },
   "demo_video": "",

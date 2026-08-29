@@ -1,0 +1,25 @@
+/* Tailwind v4 for the DEX views (/trade, /overview).
+   Full import so the class scanner runs; the source glob is explicit because this file
+   lives under src/app rather than at the project root. */
+@import "tailwindcss";
+
+@source "../**/*.{ts,tsx}";
+
+@theme {
+  /* MarginGuard DEX palette (Drift-style institutional dark) */
+  --color-void: #0a0a0b;
+  --color-panel: #121319;
+  --color-panel2: #18191e;
+  --color-long: #00e5ff;
+  --color-short: #9d4edd;
+
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-ui), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Financial figures must not jitter as they update. */
+.tnum {
+  font-family: var(--font-mono-ui), ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}

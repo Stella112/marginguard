@@ -191,6 +191,13 @@ pub mod errors {
     pub const UNKNOWN_KIND: felt252 = 'UNKNOWN_KIND';
     pub const ZERO_AGENT: felt252 = 'ZERO_AGENT';
     pub const NO_GRANT: felt252 = 'NO_GRANT';
+    pub const NOT_INITIALIZER: felt252 = 'NOT_INITIALIZER';
+    pub const BAD_SIDE: felt252 = 'BAD_SIDE';
+    pub const UNSUPPORTED_LEVERAGE: felt252 = 'UNSUPPORTED_LEVERAGE';
+    pub const LEVERAGE_INCREASE: felt252 = 'LEVERAGE_INCREASE';
+    pub const ZERO_VIEW_EPHEMERAL: felt252 = 'ZERO_VIEW_EPHEMERAL';
+    pub const ZERO_VIEW_CIPHERTEXT: felt252 = 'ZERO_VIEW_CIPHERTEXT';
+    pub const AGENT_NOT_REGISTERED: felt252 = 'AGENT_NOT_REGISTERED';
 }
 
 /// Maintenance margin as a fraction of posted margin. The brief fixes it at 50%.
@@ -207,13 +214,13 @@ pub mod PerpEngine {
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::ContractAddress;
+    use starknet::{ContractAddress, get_caller_address};
     use crate::agent_registry::{IAgentRegistryDispatcher, IAgentRegistryDispatcherTrait};
     use crate::commitments::{compute_position_commitment, compute_trader_commitment};
     use crate::oracle::{IPriceOracleDispatcher, IPriceOracleDispatcherTrait};
     use crate::types::{
         KIND_ADJUST_LEVERAGE, KIND_CLOSE_POSITION, KIND_INCREASE_MARGIN, KIND_REDUCE_SIZE,
-        PositionEntry, SIDE_BUY, SIDE_SELL, ViewGrant,
+        PositionEntry, SIDE_BUY, SIDE_SELL, ViewGrant, is_supported_leverage, is_valid_side,
     };
     use super::{
         BPS_DENOMINATOR, IPerpEngine, MAINTENANCE_BPS, MAX_LEVERAGE, errors,
@@ -224,6 +231,8 @@ pub mod PerpEngine {
 
     #[storage]
     struct Storage {
+        /// Deployment authority used only for the one-time registry binding.
+        initializer: ContractAddress,
         oracle: ContractAddress,
         agent_registry: ContractAddress,
         positions: Map<felt252, PositionEntry>,
@@ -300,6 +309,7 @@ pub mod PerpEngine {
     #[constructor]
     fn constructor(ref self: ContractState, oracle: ContractAddress) {
         assert(oracle.is_non_zero(), errors::ZERO_ORACLE);
+        self.initializer.write(get_caller_address());
         self.oracle.write(oracle);
     }
 
@@ -369,6 +379,10 @@ pub mod PerpEngine {
         }
 
         fn initialize_agent_registry(ref self: ContractState, registry: ContractAddress) {
+            let initializer = self.initializer.read();
+            if initializer.is_non_zero() {
+                assert(get_caller_address() == initializer, errors::NOT_INITIALIZER);
+            }
             assert(registry.is_non_zero(), errors::ZERO_REGISTRY);
             assert(self.agent_registry.read().is_zero(), errors::REGISTRY_ALREADY_SET);
             self.agent_registry.write(registry);
@@ -470,13 +484,8 @@ pub mod PerpEngine {
             leverage: u8,
             salt: felt252,
         ) -> bool {
-            let entry = self.positions.read(position_id);
-            assert(entry.commitment.is_non_zero(), errors::POSITION_NOT_FOUND);
-            assert(entry.open, errors::NOT_OPEN);
-            assert(
-                compute_position_commitment(side, size, entry_price, margin, leverage, salt)
-                    == entry.commitment,
-                errors::COMMITMENT_MISMATCH,
+            let entry = self.open_and_verified(
+                position_id, side, size, entry_price, margin, leverage, salt,
             );
             let price = self.price_of(entry);
             is_breached(side, size, entry_price, margin, price)
@@ -494,6 +503,15 @@ pub mod PerpEngine {
             assert(entry.commitment.is_non_zero(), errors::POSITION_NOT_FOUND);
             assert(entry.open, errors::NOT_OPEN);
             assert(agent.is_non_zero(), errors::ZERO_AGENT);
+            let registry_addr = self.agent_registry.read();
+            assert(registry_addr.is_non_zero(), errors::REGISTRY_NOT_SET);
+            assert(
+                IAgentRegistryDispatcher { contract_address: registry_addr }
+                    .is_registered_agent(agent),
+                errors::AGENT_NOT_REGISTERED,
+            );
+            assert(ephemeral.is_non_zero(), errors::ZERO_VIEW_EPHEMERAL);
+            assert(ciphertext.is_non_zero(), errors::ZERO_VIEW_CIPHERTEXT);
             // Owner-only: entitlement is the secret, as everywhere else.
             assert(
                 compute_trader_commitment(owner_secret) == entry.trader_commitment,
@@ -565,7 +583,9 @@ pub mod PerpEngine {
             assert(size.is_non_zero(), errors::ZERO_SIZE);
             assert(margin.is_non_zero(), errors::ZERO_MARGIN);
             assert(entry_price.is_non_zero(), errors::ZERO_ENTRY);
-            assert(leverage != 0 && leverage <= MAX_LEVERAGE, errors::BAD_LEVERAGE);
+            assert(is_valid_side(side), errors::BAD_SIDE);
+            assert(leverage <= MAX_LEVERAGE, errors::BAD_LEVERAGE);
+            assert(is_supported_leverage(leverage), errors::UNSUPPORTED_LEVERAGE);
             assert(
                 compute_position_commitment(side, size, entry_price, margin, leverage, salt)
                     == entry.commitment,
@@ -609,7 +629,8 @@ pub mod PerpEngine {
         if kind == KIND_INCREASE_MARGIN {
             let product: u256 = margin.into() * value.into();
             let add: u128 = (product / bps).try_into().expect(errors::VALUE_OVERFLOW);
-            (size, margin + add, leverage)
+            let new_margin: u256 = margin.into() + add.into();
+            (size, new_margin.try_into().expect(errors::VALUE_OVERFLOW), leverage)
         } else if kind == KIND_REDUCE_SIZE {
             let product: u256 = size.into() * value.into();
             let cut: u128 = (product / bps).try_into().expect(errors::VALUE_OVERFLOW);
@@ -619,7 +640,10 @@ pub mod PerpEngine {
             (new_size, margin, leverage)
         } else if kind == KIND_ADJUST_LEVERAGE {
             // Policy guaranteed 0 < value <= max_leverage <= MAX_LEVERAGE, so this narrows safely.
-            (size, margin, value.try_into().expect(errors::VALUE_OVERFLOW))
+            let next_leverage: u8 = value.try_into().expect(errors::VALUE_OVERFLOW);
+            assert(next_leverage <= leverage, errors::LEVERAGE_INCREASE);
+            assert(is_supported_leverage(next_leverage), errors::UNSUPPORTED_LEVERAGE);
+            (size, margin, next_leverage)
         } else {
             // KIND_CLOSE_POSITION is handled before this call; anything else is unreachable
             // because the registry rejects unknown kinds. Fail closed regardless.

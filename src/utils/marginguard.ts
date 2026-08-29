@@ -7,7 +7,7 @@
 import { RpcProvider, hash, shortString, num, ec } from "starknet";
 
 // ─── MAINNET deployment (full system, verified on-chain 2026-08-28) ─────────
-export const SEPOLIA_RPC = "https://rpc.starknet.lava.build"; // mainnet (name kept for callers)
+export const MAINNET_RPC = "https://rpc.starknet.lava.build";
 
 // Oracle swapped Ekubo (thin, ~3x off) -> Pragma (accurate); perp + registry redeployed.
 export const MG = {
@@ -19,9 +19,76 @@ export const MG = {
   pool: "0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",
 } as const;
 
+// The guardian is provisioned by the MarginGuard operator, not registered by end users.
+// Its signing key must remain in the operator's worker environment; only this public address
+// is exposed to the browser for status and policy reads.
+export const SYSTEM_AGENT_ADDRESS = process.env.NEXT_PUBLIC_MARGINGUARD_AGENT_ADDRESS ?? "";
+
 // Real STRK/USDC for the mainnet oracle read on the terminal.
 export const MARK_BASE = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d"; // STRK
 export const MARK_QUOTE = "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8"; // USDC
+
+export type SpotMarket = {
+  id: "strk" | "eth" | "btc" | "sol";
+  symbol: string;
+  name: string;
+  baseToken: string;
+  baseDecimals: number;
+  quoteToken: string;
+  quoteSymbol: string;
+  quoteDecimals: number;
+  available: boolean;
+  note?: string;
+};
+
+/** Mainnet spot markets. BTC is represented by canonical StarkGate WBTC. */
+export const SPOT_MARKETS: SpotMarket[] = [
+  {
+    id: "strk",
+    symbol: "STRK",
+    name: "Starknet Token",
+    baseToken: MARK_BASE,
+    baseDecimals: 18,
+    quoteToken: MARK_QUOTE,
+    quoteSymbol: "USDC",
+    quoteDecimals: 6,
+    available: true,
+  },
+  {
+    id: "eth",
+    symbol: "ETH",
+    name: "Ether",
+    baseToken: "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7",
+    baseDecimals: 18,
+    quoteToken: MARK_QUOTE,
+    quoteSymbol: "USDC",
+    quoteDecimals: 6,
+    available: true,
+  },
+  {
+    id: "btc",
+    symbol: "BTC",
+    name: "Wrapped Bitcoin",
+    baseToken: "0x03fe2b97c1fd336e750087d68b9b867997fd64a2661ff3ca5a7c771641e8e7ac",
+    baseDecimals: 8,
+    quoteToken: MARK_QUOTE,
+    quoteSymbol: "USDC",
+    quoteDecimals: 6,
+    available: true,
+  },
+  {
+    id: "sol",
+    symbol: "SOL",
+    name: "Solana",
+    baseToken: "0x0",
+    baseDecimals: 9,
+    quoteToken: MARK_QUOTE,
+    quoteSymbol: "USDC",
+    quoteDecimals: 6,
+    available: false,
+    note: "Starknet token address pending verification",
+  },
+];
 
 export const VOYAGER = "https://voyager.online/contract/";
 
@@ -152,7 +219,7 @@ export function short(hex: string): string {
 // ─── On-chain reads (no wallet needed) ──────────────────────────────────────
 let _provider: RpcProvider | null = null;
 export function readProvider(): RpcProvider {
-  if (!_provider) _provider = new RpcProvider({ nodeUrl: SEPOLIA_RPC });
+  if (!_provider) _provider = new RpcProvider({ nodeUrl: MAINNET_RPC });
   return _provider;
 }
 
@@ -244,7 +311,7 @@ export async function readAgentViewingKey(agent: string): Promise<string> {
   return vk;
 }
 
-/** Live STRK/USDC mark price from the deployed EkuboTwapOracle, in human USDC per STRK. */
+/** Live STRK/USDC mark price from the deployed PragmaOracle, in human USDC per STRK. */
 export async function readMarkPrice(): Promise<number> {
   const r = await call(MG.oracle, "get_price", [MARK_BASE, MARK_QUOTE]);
   // Oracle returns quote-smallest per base-smallest × 1e18. STRK 18dp, USDC 6dp:

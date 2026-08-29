@@ -99,6 +99,8 @@ pub mod errors {
     pub const ZERO_EXECUTOR: felt252 = 'ZERO_EXECUTOR';
     pub const EXECUTOR_ALREADY_SET: felt252 = 'EXECUTOR_ALREADY_SET';
     pub const NOT_EXECUTOR: felt252 = 'NOT_EXECUTOR';
+    pub const NOT_INITIALIZER: felt252 = 'NOT_INITIALIZER';
+    pub const ZERO_VIEWING_KEY: felt252 = 'ZERO_VIEWING_KEY';
     // consume_proposal rejection reasons — specific so the engine's revert says why.
     pub const AGENT_INACTIVE: felt252 = 'AGENT_INACTIVE';
     pub const STALE_NONCE: felt252 = 'STALE_NONCE';
@@ -125,17 +127,24 @@ pub mod AgentRegistry {
     use crate::commitments::compute_proposal_digest;
     use crate::types::{
         AgentEntry, AgentPolicy, KIND_ADJUST_LEVERAGE, KIND_CLOSE_POSITION, KIND_INCREASE_MARGIN,
-        KIND_REDUCE_SIZE,
+        KIND_REDUCE_SIZE, is_supported_leverage,
     };
     use super::{BPS_DENOMINATOR, IAgentRegistry, MAX_SUPPORTED_LEVERAGE, errors};
 
     #[storage]
     struct Storage {
+        /// Deployment authority used only for the one-time executor binding.
+        initializer: ContractAddress,
         agents: Map<ContractAddress, AgentEntry>,
         /// The perp engine, the only address allowed to consume proposals.
         executor: ContractAddress,
         /// Agent viewing public keys, for the owner->agent selective-disclosure grant.
         viewing_keys: Map<ContractAddress, felt252>,
+    }
+
+    #[constructor]
+    fn constructor(ref self: ContractState) {
+        self.initializer.write(get_caller_address());
     }
 
     #[event]
@@ -207,6 +216,7 @@ pub mod AgentRegistry {
             let agent = get_caller_address();
             // Only a registered agent can advertise a viewing key.
             assert(self.agents.read(agent).public_key.is_non_zero(), errors::NOT_REGISTERED);
+            assert(viewing_key.is_non_zero(), errors::ZERO_VIEWING_KEY);
             self.viewing_keys.write(agent, viewing_key);
         }
 
@@ -255,6 +265,7 @@ pub mod AgentRegistry {
         }
 
         fn initialize_executor(ref self: ContractState, executor: ContractAddress) {
+            self.assert_initializer();
             assert(executor.is_non_zero(), errors::ZERO_EXECUTOR);
             assert(self.executor.read().is_zero(), errors::EXECUTOR_ALREADY_SET);
             self.executor.write(executor);
@@ -296,10 +307,23 @@ pub mod AgentRegistry {
         }
     }
 
+    #[generate_trait]
+    impl InternalImpl of InternalTrait {
+        fn assert_initializer(self: @ContractState) {
+            let initializer = self.initializer.read();
+            // `contract_state_for_testing` does not run constructors; retain a zero fallback for
+            // unit tests while every deployed instance has a non-zero initializer.
+            if initializer.is_non_zero() {
+                assert(get_caller_address() == initializer, errors::NOT_INITIALIZER);
+            }
+        }
+    }
+
     /// Policy bounds are upper limits, so each must be expressible as a fraction of the whole.
     fn validate_policy(policy: AgentPolicy) {
         assert(policy.max_leverage != 0, errors::ZERO_MAX_LEVERAGE);
         assert(policy.max_leverage <= MAX_SUPPORTED_LEVERAGE, errors::LEVERAGE_TOO_HIGH);
+        assert(is_supported_leverage(policy.max_leverage), errors::LEVERAGE_TOO_HIGH);
         assert(policy.max_margin_increase_bps <= BPS_DENOMINATOR, errors::BPS_OUT_OF_RANGE);
         assert(policy.max_size_reduction_bps <= BPS_DENOMINATOR, errors::BPS_OUT_OF_RANGE);
     }
@@ -315,7 +339,9 @@ pub mod AgentRegistry {
         } else if kind == KIND_ADJUST_LEVERAGE {
             // An adjustment may only ever lower risk, so it must land at or under the cap
             // and must be a real leverage figure.
-            value != 0 && value <= policy.max_leverage.into()
+            value != 0
+                && value <= policy.max_leverage.into()
+                && (value == 2 || value == 5 || value == 10)
         } else if kind == KIND_CLOSE_POSITION {
             policy.may_close
         } else {

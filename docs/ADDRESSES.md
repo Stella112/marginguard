@@ -4,9 +4,9 @@ Everything here was checked against the chain, not copied from documentation.
 
 ## MarginGuard — MAINNET deployment (FULL system, live)
 
-Deployed 2026-08-28 via `scripts/deploy/deploy_mainnet.mjs`. Every binding verified on-chain,
-and the **real Ekubo TWAP oracle returns a live STRK/USDC price** through the perp engine
-(`EkuboTwapOracle.get_price(STRK, USDC)` → ~0.077 USDC/STRK at deploy time).
+Deployed 2026-08-28 via `scripts/deploy/swap_oracle_mainnet.mjs`. The current mainnet perp
+engine uses the **Pragma STRK/USD median oracle**, and the earlier Ekubo deployment is retained
+below only as superseded history.
 
 | Contract | Mainnet address |
 | --- | --- |
@@ -124,7 +124,8 @@ Real STRK20 private invokes, each an atomic withdraw → `privacy_invoke` → op
 
 - [ ] Ekubo mainnet router address, swap selector, and exact calldata shape (needed for the
       Phase 2 fallback route; until this is confirmed the fallback is not real)
-- [ ] Ekubo TWAP read interface, for the Phase 3 liquidation oracle (decision Q3)
+- [x] Mainnet oracle read interface: Pragma STRK/USD median adapter
+- [ ] Ekubo router address, swap selector, and exact calldata shape for the spot fallback
 
 ## Working RPC endpoints
 

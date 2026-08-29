@@ -543,3 +543,470 @@
   background: var(--violet);
   color: #0b0e11;
 }
+
+/* ── Exchange terminal refinement ─────────────────────────
+   Keep the interface dense and deliberate: exchange surfaces use hierarchy and
+   separators instead of floating cards, gradients, or decorative copy. */
+.app {
+  --bg: #0b0c0f;
+  --panel: #111216;
+  --panel2: #17181d;
+  --border: #24262c;
+  --border2: #353840;
+  --text: #eceef2;
+  --muted: #8c919b;
+  --dim: #5f646e;
+  --accent: #a98bff;
+  --accent-dim: rgba(169, 139, 255, .12);
+  --violet: #a98bff;
+  background: var(--bg);
+  letter-spacing: -0.005em;
+}
+
+.topbar {
+  height: 56px;
+  padding: 0 20px;
+  gap: 22px;
+  background: #101114;
+  border-bottom-color: #292b31;
+}
+.brand {
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+.brandDot {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(169, 139, 255, .75);
+}
+.brandMark {
+  color: var(--accent);
+}
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 12px;
+}
+.topnav a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color .16s ease;
+}
+.topnav a:hover,
+.topnavActive {
+  color: var(--text) !important;
+}
+.market {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.marketPair {
+  font-size: 13px;
+}
+.tag {
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 9px;
+}
+.seg {
+  margin-left: 0;
+  border-color: var(--border2);
+  border-radius: 3px;
+}
+.segBtn {
+  padding: 6px 11px;
+  font-size: 11px;
+}
+.segBtnOn {
+  background: #292331;
+  color: var(--accent);
+}
+.netpill {
+  border: 0;
+  padding: 0;
+  font-size: 11px;
+}
+.netLive {
+  width: 6px;
+  height: 6px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  min-height: calc(100vh - 56px);
+}
+.marketRail {
+  min-width: 0;
+  padding: 16px 9px;
+  background: #0e0f12;
+  border-right: 1px solid var(--border);
+}
+.railHeader {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 8px 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.railSearch {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 10px;
+}
+.railGroup {
+  padding: 15px 8px 7px;
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.marketItem {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+}
+.marketItem:hover,
+.marketItemActive {
+  border-left-color: var(--accent);
+  background: #17151c;
+  color: var(--text);
+}
+.marketSymbol {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #6941c6;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 750;
+}
+.marketSymbolPerp {
+  background: #2d3039;
+  color: #c5cad3;
+}
+.marketLast {
+  color: var(--dim);
+  font-size: 10px;
+}
+.railHint {
+  padding: 14px 8px;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.mainStage {
+  min-width: 0;
+}
+.stats {
+  height: 50px;
+  gap: 30px;
+  padding: 0 18px;
+  background: #101114;
+  border-bottom-color: var(--border);
+}
+.statLabel {
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+.statValue {
+  font-size: 12px;
+}
+.markBig {
+  font-size: 17px;
+}
+.grid {
+  grid-template-columns: minmax(0, 1fr) 278px 316px;
+  gap: 1px;
+  background: var(--border);
+}
+.col {
+  background: #0d0e11;
+}
+.panelHead {
+  height: 42px;
+  padding: 0 14px;
+  color: #aeb3bd;
+  font-size: 11px;
+  letter-spacing: .03em;
+  text-transform: none;
+}
+.chartWrap {
+  min-height: 420px;
+  padding: 10px;
+}
+.chartNote {
+  bottom: 12px;
+  left: 16px;
+  font-size: 10px;
+}
+.book {
+  min-height: 420px;
+}
+.bookRows {
+  padding: 10px 12px;
+  gap: 2px;
+}
+.bookRow {
+  height: 24px;
+  border-radius: 2px;
+  font-size: 11px;
+}
+.bookMid {
+  margin: 5px 0;
+  padding: 9px 8px;
+  font-size: 14px;
+}
+.bookExplain {
+  padding: 11px 14px;
+  font-size: 10px;
+}
+.trade {
+  padding: 16px 14px;
+  gap: 14px;
+}
+.sideToggle {
+  gap: 1px;
+  background: var(--border);
+}
+.sideBtn {
+  height: 34px;
+  border: 0;
+  border-radius: 2px;
+  background: #18191d;
+  font-size: 12px;
+}
+.sideLong.on {
+  background: #153c30;
+  color: #41d99a;
+}
+.sideShort.on {
+  background: #441e26;
+  color: #ff7181;
+}
+.tradeInput {
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 3px;
+  background: #15161a;
+  font-size: 13px;
+}
+.tradeInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(169, 139, 255, .16);
+}
+.levRow {
+  gap: 1px;
+  background: var(--border);
+}
+.levBtn {
+  height: 30px;
+  border: 0;
+  border-radius: 2px;
+  background: #18191d;
+  font-size: 11px;
+}
+.levBtn.on {
+  background: #292331;
+  color: var(--accent);
+}
+.privacyPreview {
+  border-radius: 3px;
+}
+.previewRow {
+  padding: 8px 10px;
+  font-size: 10.5px;
+}
+.placeBtn {
+  height: 40px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.btnSm {
+  height: 32px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.bottom {
+  background: #111216;
+}
+.tabBar {
+  padding: 0 12px;
+}
+.tab {
+  padding: 12px 13px;
+  font-size: 11px;
+}
+.tabBody {
+  padding: 18px;
+}
+
+@media (max-width: 1220px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr) 250px 290px;
+  }
+  .topnav {
+    display: none;
+  }
+}
+@media (max-width: 980px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .marketRail {
+    display: none;
+  }
+  .grid {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+  .grid > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 680px) {
+  .topbar {
+    padding: 0 12px;
+    gap: 12px;
+  }
+  .market {
+    display: none;
+  }
+  .netpill {
+    display: none;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .grid > :first-child {
+    grid-column: auto;
+  }
+  .chartWrap,
+  .book {
+    min-height: 330px;
+  }
+}
+
+.chartEmpty {
+  height: 100%;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--dim);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+.chartEmpty small {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+.marketItemDisabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.marketItemDisabled:hover {
+  border-left-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* ── Honest empty states ───────────────────────────────── */
+.chartWrapEmpty {
+  min-height: 340px;
+}
+.chartEmpty {
+  min-height: 0;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+.chartEmpty strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.chartStatus {
+  color: var(--short);
+  font-size: 10px;
+  letter-spacing: .14em;
+}
+.bookState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 100%;
+  min-height: 230px;
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.bookState strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.bookStateIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(154, 123, 255, .35);
+  border-radius: 50%;
+  color: var(--violet);
+  font-size: 14px;
+}
+.bookStateMeta {
+  margin-top: 4px;
+  color: var(--dim);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+
+/* Keep protocol tooling available without making the terminal look like a debug page. */
+.bottom {
+  margin-top: 1px;
+}
+.tabBody {
+  min-height: 112px;
+  padding: 14px 16px;
+}
+.empty {
+  padding: 22px 0;
+}
+
+@media (max-width: 680px) {
+  .chartWrapEmpty,
+  .chartWrap,
+  .book {
+    min-height: 290px;
+  }
+}

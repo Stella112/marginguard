@@ -1,6 +1,7 @@
 /**
- * One-shot MAINNET deployment via starknet.js — deploys the OZ account (if needed), then the
- * full MarginGuard system with the real Ekubo TWAP oracle.
+ * Legacy one-shot MAINNET deployment via starknet.js — deploys the OZ account (if needed), then
+ * the full MarginGuard system with the Ekubo TWAP oracle. The current mainnet deployment uses
+ * scripts/deploy/swap_oracle_mainnet.mjs and PragmaOracle instead.
  *
  * Uses starknet.js throughout because starkli 0.4.2 can't talk to the modern mainnet nodes
  * (spec/`pending`-tag mismatches). starknet.js manages block tags itself and is proven against

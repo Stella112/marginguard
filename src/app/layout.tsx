@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, Space_Mono } from 'next/font/google'
 import './globals.css'
+import './tailwind.css'
 
 // Clean neutral grotesque for everything (matches the Uniswap reference); a mono
 // only for hex addresses / hashes.

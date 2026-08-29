@@ -1,7 +1,9 @@
 # MarginGuard — Private Dark Pool & Perpetuals on Starknet
 
 **Track:** Privacy DeFi · STRK20 Private Sprint
-**Status:** Contracts complete (96 tests), **live on Starknet Sepolia**, frontend wired to the deployment.
+**Status:** Cairo contracts pass 115 tests and are deployed on Starknet mainnet. Spot STRK20
+funding/order placement is the active product slice; perp collateral custody remains gated until
+it is atomic with position opening.
 
 A private spot **dark pool** and **perpetuals** venue on Starknet, built on STRK20 shielded
 notes, with a registered agent that manages risk on each position — **the agent proposes, the
@@ -84,21 +86,20 @@ stays hidden until it trades.** That is real pre-trade opacity — the definitio
 
 ## Live deployment (Starknet MAINNET)
 
-Full system, deployed 2026-08-28 with the **real Ekubo TWAP oracle**. Every binding verified
-on-chain, and `PerpEngine → EkuboTwapOracle → Ekubo` returns a live STRK/USDC price.
+The current full deployment uses the **Pragma STRK/USD oracle**. The earlier Ekubo oracle
+deployment is retained in the address history but is not the frontend target.
 
 | Contract | Mainnet address |
 | --- | --- |
-| AgentRegistry | `0x068aba2f9dd816a8179e408c7291d1a92832a031521559ad0fd8ca27fa14e608` |
-| EkuboTwapOracle | `0x045ec9d09b1e5bd9c793ae7959e47412efd5675c2aad3394bb593705ff92e0d7` |
-| PerpEngine | `0x02c61d3c9902781dce086a000b3a959c9e0581d4c732dfbbe767cac485352983` |
+| AgentRegistry | `0x05b99dcb0d9995a112c1e12ea1695247a43811f586513027bb6d1057bc673e55` |
+| PragmaOracle | `0x038d443ba8d1bc4dc914ff2aadf9acbd3c0785c376b66986c7e7520090f5c1af` |
+| PerpEngine | `0x00aaa439cf40d1d535e7d58245443461fbff2ce7ed272b441cc09683a741354c` |
 | OrderBook | `0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c` |
 | MarginGuardVenue | `0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0` |
 | STRK20 pool (pinned) | `0x40337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a` |
 
 Full address + transaction list in [docs/ADDRESSES.md](docs/ADDRESSES.md). A prior full deploy is
-also live on Sepolia (recorded there). The oracle is the verified Ekubo extension
-`0x005e470f…dab38f` over a 30-min TWAP.
+also live on Sepolia (recorded there).
 
 ## How this maps to the sprint ideas
 
@@ -132,7 +133,7 @@ Stated here and in [SECURITY_ASSUMPTIONS.md](docs/SECURITY_ASSUMPTIONS.md):
 ## Repository
 
 ```
-contracts/   Cairo contracts + tests (scarb build, scarb cairo-test — 96 tests)
+contracts/   Cairo contracts + tests (scarb build, scarb cairo-test — 115 tests)
 scripts/     signature vectors, pool discovery, deploy (starkli + starknet.js)
 src/         Next.js frontend, wired to the Sepolia deployment
 docs/        ARCHITECTURE_REPORT · ARCHITECTURE · DEPLOYMENT · SECURITY_ASSUMPTIONS · ADDRESSES

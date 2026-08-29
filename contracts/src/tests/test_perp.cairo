@@ -122,6 +122,38 @@ fn base_and_quote_must_differ() {
         );
 }
 
+#[test]
+#[should_panic(expected: ('BAD_SIDE', 'ENTRYPOINT_FAILED'))]
+fn an_invalid_side_cannot_be_used_for_a_close() {
+    let w = setup(ENTRY);
+    w
+        .perp
+        .open_position(
+            'p1',
+            compute_trader_commitment(OWNER_SECRET),
+            compute_position_commitment(2, SIZE, ENTRY, MARGIN, LEV, 'invalid_side'),
+            base(),
+            quote(),
+        );
+    w.perp.close_position('p1', OWNER_SECRET, 2, SIZE, ENTRY, MARGIN, LEV, 'invalid_side');
+}
+
+#[test]
+#[should_panic(expected: ('UNSUPPORTED_LEVERAGE', 'ENTRYPOINT_FAILED'))]
+fn a_non_tier_leverage_cannot_be_used_for_a_close() {
+    let w = setup(ENTRY);
+    w
+        .perp
+        .open_position(
+            'p1',
+            compute_trader_commitment(OWNER_SECRET),
+            compute_position_commitment(SIDE_BUY, SIZE, ENTRY, MARGIN, 3, 'invalid_leverage'),
+            base(),
+            quote(),
+        );
+    w.perp.close_position('p1', OWNER_SECRET, SIDE_BUY, SIZE, ENTRY, MARGIN, 3, 'invalid_leverage');
+}
+
 // ---------------------------------------------------------------------------
 // Close settlement (PnL).
 // ---------------------------------------------------------------------------

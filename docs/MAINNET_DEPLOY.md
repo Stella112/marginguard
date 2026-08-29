@@ -1,6 +1,8 @@
 # Mainnet deployment runbook
 
-Deploys the full MarginGuard system to Starknet **mainnet**, with the real **Ekubo TWAP oracle**.
+The original full deployment path used the Ekubo TWAP oracle. The current mainnet deployment uses
+the Pragma STRK/USD median adapter; use `scripts/deploy/swap_oracle_mainnet.mjs` as the historical
+deployment reference and redeploy the patched contracts before holding value.
 You run the signing (real funds); Claude prepares the commands and verifies on-chain.
 
 ## Cost

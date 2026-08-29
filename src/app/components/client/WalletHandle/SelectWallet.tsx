@@ -144,7 +144,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className={styles.walletIcon} src={w.icon} alt="" />
                 <span className={styles.walletName}>{w.name}</span>
-                <span className={styles.walletGo}>{connecting ? "…" : "→"}</span>
+                <span className={styles.walletGo}>{connecting ? "Connecting" : "Open"}</span>
               </button>
             ))}
           </div>

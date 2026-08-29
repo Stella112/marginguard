@@ -1,587 +1,219 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ec } from "starknet";
-import s from "./terminal.module.css";
-import SelectWallet from "./components/client/WalletHandle/SelectWallet";
-import { useStoreWallet } from "./components/Wallet/walletContext";
-import {
-  MG,
-  VOYAGER,
-  SIDE_BUY,
-  SIDE_SELL,
-  orderCommitment,
-  positionCommitment,
-  traderCommitment,
-  randomFelt,
-  short,
-  readProvider,
-  readVenueStatus,
-  readMarkPrice,
-  readAgent,
-  readViewGrant,
-  readPosition,
-  grantRoundTrip,
-  type VenueStatus,
-  type AgentInfo,
-  type ViewGrant,
-  type PositionView,
-} from "@/utils/marginguard";
+import { useEffect, useState } from "react";
+import { motion } from "motion/react";
+import c from "./landing.module.css";
+import { MG, VOYAGER, readMarkPrice } from "@/utils/marginguard";
 
-const SCALE = 10n ** 18n;
+const fadeUp = {
+  initial: { opacity: 0, y: 26 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, margin: "-80px" },
+  transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const },
+};
 
-/** Price with precision that adapts to magnitude (more decimals for sub-dollar assets). */
-function fmtPrice(p: number): string {
+function price(p: number): string {
   if (!p) return "—";
-  if (p >= 100) return p.toFixed(2);
-  if (p >= 1) return p.toFixed(3);
-  return p.toFixed(5);
+  return p < 1 ? p.toFixed(5) : p.toFixed(2);
 }
 
-// ─── Synthetic candles (illustrative), ending at the live mark ──────────────
-function candles(mark: number, n = 52) {
-  let seed = 20260827;
-  const rnd = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-  const out: { o: number; h: number; l: number; c: number }[] = [];
-  let price = mark * 0.94;
-  for (let i = 0; i < n; i++) {
-    const o = price;
-    const drift = (mark - price) * 0.05;
-    const c = o + drift + (rnd() - 0.48) * mark * 0.012;
-    const h = Math.max(o, c) + rnd() * mark * 0.006;
-    const l = Math.min(o, c) - rnd() * mark * 0.006;
-    out.push({ o, h, l, c });
-    price = c;
-  }
-  // pin the last close to the mark
-  if (out.length) out[out.length - 1].c = mark;
-  return out;
-}
-
-function Chart({ mark }: { mark: number }) {
-  const data = useMemo(() => candles(mark), [mark]);
-  const W = 800;
-  const H = 360;
-  const pad = 8;
-  const lo = Math.min(...data.map((d) => d.l));
-  const hi = Math.max(...data.map((d) => d.h));
-  const y = (p: number) => pad + (1 - (p - lo) / (hi - lo || 1)) * (H - 2 * pad);
-  const cw = (W - 2 * pad) / data.length;
-  return (
-    <svg className={s.chartSvg} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {[0.2, 0.4, 0.6, 0.8].map((f) => (
-        <line key={f} x1={0} x2={W} y1={pad + f * (H - 2 * pad)} y2={pad + f * (H - 2 * pad)} stroke="#1c242e" strokeWidth={1} />
-      ))}
-      {data.map((d, i) => {
-        const x = pad + i * cw + cw / 2;
-        const up = d.c >= d.o;
-        const col = up ? "#16c784" : "#f6465d";
-        return (
-          <g key={i}>
-            <line x1={x} x2={x} y1={y(d.h)} y2={y(d.l)} stroke={col} strokeWidth={1} />
-            <rect
-              x={x - cw * 0.3}
-              width={cw * 0.6}
-              y={Math.min(y(d.o), y(d.c))}
-              height={Math.max(2, Math.abs(y(d.o) - y(d.c)))}
-              fill={col}
-            />
-          </g>
-        );
-      })}
-      <line x1={0} x2={W} y1={y(mark)} y2={y(mark)} stroke="#5b8def" strokeWidth={1} strokeDasharray="4 3" />
-    </svg>
-  );
-}
-
-// ─── Shielded order book (the dark-pool differentiator) ─────────────────────
-function ShieldedBook({ mark }: { mark: number }) {
-  const rows = (side: "ask" | "bid") =>
-    Array.from({ length: 7 }).map((_, i) => {
-      const depth = 30 + ((i * 37) % 60);
-      return (
-        <div key={i} className={`${s.bookRow} ${side === "ask" ? s.askRow : s.bidRow}`}>
-          <span className={s.depth} style={{ width: `${depth}%` }} />
-          <span className={s.bookHidden}>■ ■ ■ ■ ■</span>
-          <span className={s.bookHidden}>shielded</span>
-        </div>
-      );
-    });
-  return (
-    <div className={s.col}>
-      <div className={s.panelHead}>
-        <span>Shielded book</span>
-        <span className={s.tag} style={{ background: "rgba(154,123,255,.16)", color: "#9a7bff" }}>DARK</span>
-      </div>
-      <div className={s.book}>
-        <div className={s.bookRows}>
-          {rows("ask")}
-          <div className={s.bookMid}>
-            <span className={s.up}>{fmtPrice(mark)}</span>
-            <span className={s.muted} style={{ fontSize: 11, fontWeight: 400 }}>midpoint</span>
-          </div>
-          {rows("bid")}
-        </div>
-        <div className={s.bookExplain}>
-          Every resting order is a Poseidon commitment — price and size are hidden until it trades.
-          A match executes at the midpoint; ownership is never revealed. This is what a real dark
-          pool looks like on-chain.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Trade panel ────────────────────────────────────────────────────────────
-function TradePanel({ mark }: { mark: number }) {
-  const isConnected = useStoreWallet((st) => st.isConnected);
-  const [side, setSide] = useState(SIDE_BUY);
-  const [size, setSize] = useState("100");
-  const [lev, setLev] = useState(2);
-  const [salt, setSalt] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  useEffect(() => setSalt(randomFelt()), []);
-
-  const entry = mark || 1500;
-  const sizeN = Number(size) || 0;
-  const notional = sizeN * entry;
-  const margin = lev > 0 ? notional / lev : 0;
-
-  const commitment = salt
-    ? positionCommitment(
-        side,
-        BigInt(Math.round(sizeN)),
-        BigInt(Math.round(entry * 1e18)) * 1n,
-        BigInt(Math.round(margin)),
-        lev,
-        salt,
-      )
-    : "…";
-
-  return (
-    <div className={s.col}>
-      <div className={s.panelHead}>Open position</div>
-      <div className={s.trade}>
-        <div className={s.sideToggle}>
-          <button className={`${s.sideBtn} ${s.sideLong} ${side === SIDE_BUY ? s.on : ""}`} onClick={() => setSide(SIDE_BUY)}>
-            Long
-          </button>
-          <button className={`${s.sideBtn} ${s.sideShort} ${side === SIDE_SELL ? s.on : ""}`} onClick={() => setSide(SIDE_SELL)}>
-            Short
-          </button>
-        </div>
-
-        <div>
-          <div className={s.tradeLabel}>
-            <span>Size (STRK)</span>
-            <span className={s.mono}>≈ ${notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-          </div>
-          <input className={s.tradeInput} value={size} onChange={(e) => setSize(e.target.value)} />
-        </div>
-
-        <div>
-          <div className={s.tradeLabel}><span>Leverage</span><span className={s.mono}>{lev}x</span></div>
-          <div className={s.levRow}>
-            {[2, 5, 10].map((l) => (
-              <button key={l} className={`${s.levBtn} ${lev === l ? s.on : ""}`} onClick={() => setLev(l)}>
-                {l}x
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className={s.privacyPreview}>
-          <div className={`${s.previewRow} ${s.previewShielded}`}>
-            <span className={s.previewLabel}><span className={s.lock}>🔒</span> entry / size / margin / lev</span>
-            <span className={s.mono}>{fmtPrice(entry)} / {sizeN} / {margin.toFixed(2)} / {lev}x</span>
-          </div>
-          <div className={`${s.previewRow} ${s.previewShielded}`}>
-            <span className={s.previewLabel}><span className={s.lock}>🔒</span> shielded — off chain</span>
-            <span className={s.mono}>all of the above</span>
-          </div>
-          <div className={`${s.previewRow} ${s.previewPublic}`}>
-            <span className={s.previewLabel}>🌐 stored on chain</span>
-            <span className={s.mono}>{short(commitment)}</span>
-          </div>
-        </div>
-
-        <button
-          className={`${s.placeBtn} ${side === SIDE_BUY ? s.placeLong : s.placeShort}`}
-          disabled={!isConnected}
-          onClick={() =>
-            setStatus(
-              isConnected
-                ? `Position commitment built (${short(commitment)}). Full shielded open routes through the STRK20 pool — wire your privacy wallet to submit.`
-                : null,
-            )
-          }
-        >
-          {isConnected ? `${side === SIDE_BUY ? "Long" : "Short"} STRK ${lev}x` : "Connect wallet"}
-        </button>
-
-        {status && <div className={`${s.status} ${s.statusInfo}`}>{status}</div>}
-        <p className={s.hint}>
-          The commitment above is exactly what the contract stores — computed here with the same
-          Poseidon scheme as the Cairo code. Change any input and it changes completely.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Spot panel (the dark-pool DEX) ─────────────────────────────────────────
-function SpotPanel({ mark }: { mark: number }) {
-  const isConnected = useStoreWallet((st) => st.isConnected);
-  const [side, setSide] = useState(SIDE_BUY);
-  const [price, setPrice] = useState("");
-  const [size, setSize] = useState("1000");
-  const [salt, setSalt] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  useEffect(() => {
-    setSalt(randomFelt());
-  }, []);
-  // Default the limit price to the live mark once it loads.
-  useEffect(() => {
-    if (mark && !price) setPrice(mark.toFixed(5));
-  }, [mark, price]);
-
-  const priceN = Number(price) || 0;
-  const sizeN = Number(size) || 0;
-  const commitment = salt
-    ? orderCommitment(side, BigInt(Math.round(priceN * 1e6)), BigInt(Math.round(sizeN)), salt)
-    : "…";
-
-  return (
-    <div className={s.col}>
-      <div className={s.panelHead}>Place order · dark pool</div>
-      <div className={s.trade}>
-        <div className={s.sideToggle}>
-          <button className={`${s.sideBtn} ${s.sideLong} ${side === SIDE_BUY ? s.on : ""}`} onClick={() => setSide(SIDE_BUY)}>
-            Buy
-          </button>
-          <button className={`${s.sideBtn} ${s.sideShort} ${side === SIDE_SELL ? s.on : ""}`} onClick={() => setSide(SIDE_SELL)}>
-            Sell
-          </button>
-        </div>
-
-        <div>
-          <div className={s.tradeLabel}><span>Limit price (USDC)</span><span className={s.mono}>mark {fmtPrice(mark)}</span></div>
-          <input className={s.tradeInput} value={price} onChange={(e) => setPrice(e.target.value)} />
-        </div>
-
-        <div>
-          <div className={s.tradeLabel}>
-            <span>Size (STRK)</span>
-            <span className={s.mono}>≈ ${(priceN * sizeN).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-          </div>
-          <input className={s.tradeInput} value={size} onChange={(e) => setSize(e.target.value)} />
-        </div>
-
-        <div className={s.privacyPreview}>
-          <div className={`${s.previewRow} ${s.previewShielded}`}>
-            <span className={s.previewLabel}><span className={s.lock}>🔒</span> side / price / size</span>
-            <span className={s.mono}>{side === SIDE_BUY ? "buy" : "sell"} / {price || "—"} / {sizeN}</span>
-          </div>
-          <div className={`${s.previewRow} ${s.previewPublic}`}>
-            <span className={s.previewLabel}>🌐 order commitment on chain</span>
-            <span className={s.mono}>{short(commitment)}</span>
-          </div>
-          <div className={`${s.previewRow} ${s.previewPublic}`}>
-            <span className={s.previewLabel}>🌐 public flags</span>
-            <span className={s.mono}>live=1 matched=0</span>
-          </div>
-        </div>
-
-        <button
-          className={`${s.placeBtn} ${side === SIDE_BUY ? s.placeLong : s.placeShort}`}
-          disabled={!isConnected}
-          onClick={() =>
-            setStatus(
-              isConnected
-                ? `Order commitment built (${short(commitment)}). It rests hidden until a matching counterparty crosses; full private placement funds through the STRK20 pool.`
-                : null,
-            )
-          }
-        >
-          {isConnected ? `${side === SIDE_BUY ? "Buy" : "Sell"} STRK (hidden)` : "Connect wallet"}
-        </button>
-
-        {status && <div className={`${s.status} ${s.statusInfo}`}>{status}</div>}
-        <p className={s.hint}>
-          A dark-pool order: only this commitment reaches the chain. Price and size stay hidden
-          until it matches at the midpoint — no one front-runs what they can&apos;t see.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Bottom tabs ────────────────────────────────────────────────────────────
-type Tab = "positions" | "agent" | "privacy" | "contracts";
-
-function PositionsTab() {
-  const [id, setId] = useState("");
-  const [pos, setPos] = useState<PositionView | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  async function look() {
-    setErr(""); setPos(null);
-    if (!id) return;
-    try { setBusy(true); setPos(await readPosition(id)); }
-    catch (e: unknown) { setErr(`${(e as Error)?.message ?? e}`); }
-    finally { setBusy(false); }
-  }
-  return (
-    <div>
-      <p className={s.cardTitle}>Positions — look up by id</p>
-      <div style={{ display: "flex", gap: 10, maxWidth: 560 }}>
-        <input className={s.tradeInput} placeholder="0x… position id" value={id} onChange={(e) => setId(e.target.value.trim())} />
-        <button className={`${s.btnSm} ${s.btnAccent}`} disabled={busy} onClick={look}>Look up</button>
-      </div>
-      {pos && !pos.exists && <div className={s.empty}>No position under that id.</div>}
-      {pos && pos.exists && (
-        <div style={{ maxWidth: 560, marginTop: 12 }}>
-          <div className={s.row}><span className={s.muted}>status</span><span className={pos.open ? s.ok : s.muted}>{pos.liquidated ? "liquidated" : pos.open ? "open" : "closed"}</span></div>
-          <div className={s.row}><span className={s.muted}>market</span><span className={s.mono}>{short(pos.baseToken)} / {short(pos.quoteToken)}</span></div>
-          <div className={s.row}><span className={s.muted}>commitment</span><span className={s.mono}>{short(pos.commitment)}</span></div>
-        </div>
-      )}
-      {err && <div className={`${s.status} ${s.statusErr}`}>{err}</div>}
-      {!pos && !err && <div className={s.empty}>Positions rest as commitments — size, entry and PnL are shielded. Look one up by id.</div>}
-    </div>
-  );
-}
-
-function AgentTab() {
-  const isConnected = useStoreWallet((st) => st.isConnected);
-  const address = useStoreWallet((st) => st.address);
-  const wa = useStoreWallet((st) => st.myWalletAccount);
-  const [lookup, setLookup] = useState("");
-  const [info, setInfo] = useState<AgentInfo | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<{ k: string; m: string } | null>(null);
-
-  async function look(a: string) {
-    setStatus(null); setInfo(null);
-    if (!a) return;
-    try { setBusy(true); setInfo(await readAgent(a)); }
-    catch (e: unknown) { setStatus({ k: "err", m: `${(e as Error)?.message ?? e}` }); }
-    finally { setBusy(false); }
-  }
-  async function register() {
-    if (!wa) { setStatus({ k: "err", m: "connect a wallet" }); return; }
-    try {
-      setBusy(true); setStatus({ k: "info", m: "submitting registration…" });
-      const pub = ec.starkCurve.getStarkKey(randomFelt());
-      const res = await wa.execute([{ contractAddress: MG.agentRegistry, entrypoint: "register_agent", calldata: [pub, "5000", "3000", "5", "1"] }]);
-      setStatus({ k: "info", m: `submitted ${short(res.transaction_hash)}…` });
-      await readProvider().waitForTransaction(res.transaction_hash);
-      setStatus({ k: "ok", m: "registered ✓" });
-      setLookup(address); await look(address);
-    } catch (e: unknown) { setStatus({ k: "err", m: `${(e as Error)?.message ?? e}` }); }
-    finally { setBusy(false); }
-  }
-  return (
-    <div className={s.grid2}>
-      <div>
-        <p className={s.cardTitle}>Agent registry (live)</p>
-        <div className={s.field} style={{ marginBottom: 10 }}>
-          <label>Look up agent address</label>
-          <input className={s.tradeInput} placeholder="0x…" value={lookup} onChange={(e) => setLookup(e.target.value.trim())} />
-        </div>
-        <button className={s.btnSm} disabled={busy} onClick={() => look(lookup)}>Look up</button>
-        {info && (
-          <div style={{ marginTop: 12 }}>
-            <div className={s.row}><span className={s.muted}>registered</span><span className={info.registered ? s.ok : s.bad}>{info.registered ? "yes" : "no"}</span></div>
-            {info.registered && info.policy && (
-              <>
-                <div className={s.row}><span className={s.muted}>public key</span><span className={s.mono}>{short(info.publicKey)}</span></div>
-                <div className={s.row}><span className={s.muted}>next nonce</span><span className={s.mono}>{BigInt(info.nonce).toString()}</span></div>
-                <div className={s.row}><span className={s.muted}>policy</span><span className={s.mono}>≤{info.policy.maxMarginIncreaseBps / 100}% mgn · ≤{info.policy.maxSizeReductionBps / 100}% cut · ≤{info.policy.maxLeverage}x</span></div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-      <div>
-        <p className={s.cardTitle}>The trust model</p>
-        <p className={s.hint} style={{ marginBottom: 12 }}>
-          The agent proposes; the contract verifies identity, signature, policy and nonce, then
-          enforces. The agent holds no funds and no keys — a compromised agent key can only ever
-          act within the policy you set.
-        </p>
-        <button className={`${s.btnSm} ${s.btnAccent}`} disabled={busy || !isConnected} onClick={register}>
-          {isConnected ? "Register a demo agent (live tx)" : "Connect wallet to register"}
-        </button>
-        {status && <div className={`${s.status} ${status.k === "ok" ? s.statusOk : status.k === "err" ? s.statusErr : s.statusInfo}`}>{status.m}</div>}
-      </div>
-    </div>
-  );
-}
-
-function PrivacyTab() {
-  const [priv, setPriv] = useState("");
-  const [cap, setCap] = useState("");
-  useEffect(() => { setPriv(randomFelt()); setCap(randomFelt()); }, []);
-  const demo = priv && cap ? grantRoundTrip(cap, priv) : null;
-
-  const [posId, setPosId] = useState("");
-  const [grant, setGrant] = useState<ViewGrant | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  async function look() {
-    setErr(""); setGrant(null);
-    if (!posId) return;
-    try { setBusy(true); setGrant(await readViewGrant(posId)); }
-    catch (e: unknown) { setErr(`${(e as Error)?.message ?? e}`); }
-    finally { setBusy(false); }
-  }
-  return (
-    <div className={s.grid2}>
-      <div>
-        <p className={s.cardTitle}>Viewing-key delegation (IDEA-21)</p>
-        <p className={s.hint} style={{ marginBottom: 12 }}>
-          Positions are hidden from the public and other traders — not from the agent that
-          protects them. The owner grants the agent a scoped, revocable view via real STARK-curve
-          ECDH. Below: a live encrypt → recover round-trip.
-        </p>
-        <div className={s.privacyPreview}>
-          <div className={`${s.previewRow} ${s.previewShielded}`}><span className={s.previewLabel}><span className={s.lock}>🔒</span> viewing capability</span><span className={s.mono}>{short(cap)}</span></div>
-          <div className={`${s.previewRow} ${s.previewPublic}`}><span className={s.previewLabel}>🌐 ephemeral rG.x</span><span className={s.mono}>{short(demo?.ephemeralOnChain ?? "")}</span></div>
-          <div className={`${s.previewRow} ${s.previewPublic}`}><span className={s.previewLabel}>🌐 ciphertext</span><span className={s.mono}>{short(demo?.ciphertext ?? "")}</span></div>
-          <div className={`${s.previewRow} ${s.previewShielded}`}><span className={s.previewLabel}>agent recovers</span><span className={demo?.ok ? s.ok : s.bad}>{demo ? (demo.ok ? "✓ exact capability" : "✗") : "…"}</span></div>
-        </div>
-        <button className={s.btnSm} style={{ marginTop: 10 }} onClick={() => { setPriv(randomFelt()); setCap(randomFelt()); }}>↻ regenerate</button>
-      </div>
-      <div>
-        <p className={s.cardTitle}>Live grant lookup</p>
-        <div className={s.field} style={{ marginBottom: 10 }}>
-          <label>Position id</label>
-          <input className={s.tradeInput} placeholder="0x…" value={posId} onChange={(e) => setPosId(e.target.value.trim())} />
-        </div>
-        <button className={s.btnSm} disabled={busy} onClick={look}>Look up grant</button>
-        {grant && (
-          <div style={{ marginTop: 12 }}>
-            <div className={s.row}><span className={s.muted}>granted agent</span><span className={s.mono}>{BigInt(grant.agent) === 0n ? "none" : short(grant.agent)}</span></div>
-            <div className={s.row}><span className={s.muted}>status</span><span className={grant.active ? s.ok : s.muted}>{BigInt(grant.agent) === 0n ? "no grant" : grant.active ? "active" : "revoked"}</span></div>
-          </div>
-        )}
-        {err && <div className={`${s.status} ${s.statusErr}`}>{err}</div>}
-      </div>
-    </div>
-  );
-}
-
-function ContractsTab({ status }: { status: VenueStatus | null }) {
-  const rows: [string, string][] = [
-    ["AgentRegistry", MG.agentRegistry],
-    ["PerpEngine", MG.perpEngine],
-    ["OrderBook", MG.orderBook],
-    ["MarginGuardVenue", MG.venue],
-    ["ManualOracle", MG.oracle],
-    ["STRK20 pool", MG.pool],
-  ];
-  return (
-    <div>
-      <p className={s.cardTitle}>Live on Starknet Mainnet</p>
-      <div style={{ maxWidth: 640 }}>
-        {rows.map(([n, a]) => (
-          <div className={s.row} key={n}>
-            <span className={s.muted}>{n}</span>
-            <a className={`${s.link} ${s.mono}`} href={`${VOYAGER}${a}`} target="_blank" rel="noreferrer">{short(a)}</a>
-          </div>
-        ))}
-        <div className={s.row}>
-          <span className={s.muted}>wiring</span>
-          <span className={status ? (status.wired ? s.ok : s.bad) : s.muted}>{status ? (status.wired ? "✓ book ↔ venue ↔ pool" : "mismatch") : "checking…"}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type Mode = "spot" | "perps";
-
-export default function Page() {
+export default function Landing() {
   const [mark, setMark] = useState(0);
-  const [status, setStatus] = useState<VenueStatus | null>(null);
-  const [tab, setTab] = useState<Tab>("positions");
-  const [mode, setMode] = useState<Mode>("spot");
-
   useEffect(() => {
-    readMarkPrice().then(setMark).catch(() => setMark(1500));
-    readVenueStatus().then(setStatus).catch(() => {});
+    readMarkPrice().then(setMark).catch(() => {});
   }, []);
 
-  const change = 2.34; // illustrative 24h
-
   return (
-    <div className={s.app}>
-      <div className={s.topbar}>
-        <div className={s.brand}>
-          <span className={s.brandDot} />
-          Margin<span className={s.brandMark}>Guard</span>
+    <div className={c.page}>
+      <nav className={c.nav}>
+        <div className={c.brand}>
+          <span className={c.brandDot} />
+          Margin<span className={c.brandMark}>Guard</span>
         </div>
-        <div className={s.market}>
-          <span className={s.marketPair}>STRK-USDC</span>
-          <span className={s.tag}>{mode === "spot" ? "SPOT" : "PERP"}</span>
-          <span className={`${s.tag} ${s.tagPrivate}`}>PRIVATE</span>
+        <div className={c.navRight}>
+          <a className={c.navLink} href="https://github.com/Stella112/marginguard" target="_blank" rel="noreferrer">GitHub</a>
+          <a className={c.navCta} href="/trade">Launch Terminal →</a>
         </div>
-        <div className={s.seg}>
-          <button className={`${s.segBtn} ${mode === "spot" ? s.segBtnOn : ""}`} onClick={() => setMode("spot")}>
-            Spot · Dark Pool
-          </button>
-          <button className={`${s.segBtn} ${mode === "perps" ? s.segBtnOn : ""}`} onClick={() => setMode("perps")}>
-            Perps
-          </button>
-        </div>
-        <div className={s.spacer} />
-        <div className={s.netpill}><span className={s.netLive} /> Mainnet · live</div>
-        <SelectWallet variant="nav" />
-      </div>
+      </nav>
 
-      <div className={s.stats}>
-        <div className={s.stat}>
-          <span className={s.statLabel}>Mark (oracle)</span>
-          <span className={`${s.statValue} ${s.markBig} ${s.mono} ${s.up}`}>{fmtPrice(mark)}</span>
-        </div>
-        <div className={s.stat}><span className={s.statLabel}>24h</span><span className={`${s.statValue} ${s.mono} ${s.up}`}>+{change}%</span></div>
-        <div className={s.stat}><span className={s.statLabel}>Maint. margin</span><span className={`${s.statValue} ${s.mono}`}>50%</span></div>
-        <div className={s.stat}><span className={s.statLabel}>Max leverage</span><span className={`${s.statValue} ${s.mono}`}>10x</span></div>
-        <div className={s.stat}><span className={s.statLabel}>Settlement</span><span className={`${s.statValue} ${s.mono}`}>shielded notes</span></div>
-        <div className={s.stat}><span className={s.statLabel}>Venue</span><span className={`${s.statValue} ${s.mono} ${status?.wired ? s.up : ""}`}>{status ? (status.wired ? "wired ✓" : "—") : "…"}</span></div>
-      </div>
+      {/* Hero */}
+      <header className={c.hero}>
+        <div className={c.grid3d} />
+        <motion.div className={`${c.orb} ${c.orb1}`} animate={{ x: [0, 40, 0], y: [0, 30, 0] }} transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }} />
+        <motion.div className={`${c.orb} ${c.orb2}`} animate={{ x: [0, -50, 0], y: [0, -20, 0] }} transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }} />
 
-      <div className={s.grid}>
-        <div className={s.col}>
-          <div className={s.panelHead}><span>STRK-USDC · chart</span><span className={s.muted} style={{ textTransform: "none", fontWeight: 400 }}>illustrative</span></div>
-          <div className={s.chartWrap}>
-            <Chart mark={mark || 1500} />
-            <div className={s.chartNote}>Blue line = live oracle mark. Candles illustrative (no public trade tape — orders are shielded).</div>
+        <motion.div className={c.livePill} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <span className={c.liveDot} /> Live on Starknet Mainnet
+        </motion.div>
+
+        <motion.h1 className={c.h1} initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}>
+          Trade in the dark.
+          <br />
+          <span className={c.accent}>Verified in the open.</span>
+        </motion.h1>
+
+        <motion.p className={c.sub} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.7, delay: 0.35 }}>
+          A private dark pool and perpetuals venue on Starknet, built on STRK20 shielded notes.
+          Who is trading is never revealed. What a resting order was stays hidden until it trades.
+          An agent protects your position — and the contract checks its every move.
+        </motion.p>
+
+        <motion.div className={c.heroCtas} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.5 }}>
+          <a className={c.btnPrimary} href="/trade">Launch Terminal</a>
+          <a className={c.btnGhost} href="#how">See how it works</a>
+        </motion.div>
+
+        <motion.div className={c.ticker} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}>
+          <span className={c.mono} style={{ color: "#8a97ac" }}>STRK / USDC</span>
+          <span className={`${c.tickerPrice} ${c.mono}`}>${price(mark)}</span>
+          <span className={c.mono} style={{ color: "#5a6678", fontSize: 12 }}>live · Pragma oracle</span>
+        </motion.div>
+      </header>
+
+      {/* Problem */}
+      <section className={c.section} id="how">
+        <motion.div {...fadeUp}>
+          <div className={c.kicker}>The problem</div>
+          <h2 className={c.h2}>On a public order book, everyone sees your hand before you play it.</h2>
+          <p className={c.lead}>
+            Size, direction, price impact — all visible in the mempool before a trade settles.
+            The trades that most need discretion are exactly the ones a transparent book punishes.
+            STRK20 made transfers private on Starknet; MarginGuard makes <em>matching</em> private.
+          </p>
+        </motion.div>
+      </section>
+
+      {/* Dark pool — commitment transform */}
+      <section className={c.section}>
+        <motion.div {...fadeUp}>
+          <div className={c.kicker}>The dark pool</div>
+          <h2 className={c.h2}>Your order becomes a single hash. The rest stays yours.</h2>
+          <p className={c.lead}>
+            Price and size are folded into one Poseidon commitment. Only that reaches the chain — it
+            reveals nothing and can&apos;t be guessed. Orders match at a contract-enforced midpoint,
+            settling into shielded notes. No one front-runs what they can&apos;t see.
+          </p>
+        </motion.div>
+        <motion.div className={c.transform} {...fadeUp}>
+          <div className={c.plain}>
+            <span className={c.chip}>🔒 side: buy</span>
+            <span className={c.chip}>🔒 price: 0.0246</span>
+            <span className={c.chip}>🔒 size: 10,000</span>
           </div>
-        </div>
-        <ShieldedBook mark={mark || 1500} />
-        {mode === "spot" ? <SpotPanel mark={mark} /> : <TradePanel mark={mark} />}
-      </div>
+          <span className={c.arrowBig}>→</span>
+          <div className={`${c.hashOut} ${c.mono}`}>0x2170c88c228d5f16362ea596c1f417c7bb16acd061fbd4bd96089392a4ec41a</div>
+        </motion.div>
+      </section>
 
-      <div className={s.bottom}>
-        <div className={s.tabBar}>
-          {(["positions", "agent", "privacy", "contracts"] as Tab[]).map((t) => (
-            <button key={t} className={`${s.tab} ${tab === t ? s.on : ""}`} onClick={() => setTab(t)}>
-              {t === "positions" ? "Positions" : t === "agent" ? "Agent" : t === "privacy" ? "Privacy" : "Contracts"}
-            </button>
+      {/* Two products */}
+      <section className={c.section}>
+        <motion.div {...fadeUp}>
+          <div className={c.kicker}>Two products, one privacy pool</div>
+          <h2 className={c.h2}>Spot and perps, both shielded to the same core.</h2>
+        </motion.div>
+        <div className={c.cards}>
+          {[
+            { icon: "🌑", title: "Spot dark pool", text: "Hidden limit orders, matched at a private midpoint, settled into shielded STRK20 notes. Deposit once, trade many — funding never links to an order." },
+            { icon: "📈", title: "Private perpetuals", text: "Leveraged long/short at 2x, 5x, 10x. Size, entry, margin, PnL and liquidation thresholds all shielded. Liquidations gated on a live Pragma oracle." },
+            { icon: "🛡️", title: "Agent-verified risk", text: "A registered agent watches each position and proposes protective moves — but the contract verifies identity, signature, policy and state before anything executes." },
+          ].map((x, i) => (
+            <motion.div key={x.title} className={c.card} {...fadeUp} transition={{ ...fadeUp.transition, delay: i * 0.1 }}>
+              <div className={c.cardIcon}>{x.icon}</div>
+              <div className={c.cardTitle}>{x.title}</div>
+              <div className={c.cardText}>{x.text}</div>
+            </motion.div>
           ))}
         </div>
-        <div className={s.tabBody}>
-          {tab === "positions" && <PositionsTab />}
-          {tab === "agent" && <AgentTab />}
-          {tab === "privacy" && <PrivacyTab />}
-          {tab === "contracts" && <ContractsTab status={status} />}
+      </section>
+
+      {/* Agent flow */}
+      <section className={c.section}>
+        <motion.div {...fadeUp}>
+          <div className={c.kicker}>The trust model</div>
+          <h2 className={c.h2}>The agent proposes. The contract verifies. The contract enforces.</h2>
+          <p className={c.lead}>
+            Active risk management usually means handing an agent control over a visible position.
+            Here the agent has zero authority — it only signs a suggestion. A stolen agent key can
+            never do more than the policy you set.
+          </p>
+        </motion.div>
+        <div className={c.flow}>
+          {[
+            { n: "01", t: "Observe", d: "The agent reads your position through a scoped viewing key you granted — hidden from the public, not from the agent protecting it." },
+            { n: "02", t: "Propose & sign", d: "It signs a protective move: add margin, trim size, lower leverage, close. Just a signature — no funds, no state." },
+            { n: "03", t: "Verify & enforce", d: "The contract checks identity, signature, policy and the real position, burns the nonce, then executes. It is the final authority." },
+          ].map((x, i) => (
+            <motion.div key={x.n} className={c.step} {...fadeUp} transition={{ ...fadeUp.transition, delay: i * 0.12 }}>
+              <div className={c.stepNum}>{x.n}</div>
+              <div className={c.stepTitle}>{x.t}</div>
+              <div className={c.stepText}>{x.d}</div>
+            </motion.div>
+          ))}
         </div>
-      </div>
+      </section>
+
+      {/* Viewing key */}
+      <section className={c.section}>
+        <motion.div {...fadeUp}>
+          <div className={c.kicker}>Selective disclosure · IDEA-21</div>
+          <h2 className={c.h2}>Hidden from the market. Visible to the guardian you choose.</h2>
+          <p className={c.lead}>
+            When you open a position you grant the agent a scoped, revocable view using STRK20&apos;s
+            own ECDH scheme — real cryptography, not a mock. The chain records only that a grant
+            exists; the values stay off-chain. Revoke it any time. It&apos;s a documented trust
+            boundary, not a privacy hole.
+          </p>
+        </motion.div>
+      </section>
+
+      {/* Live on mainnet */}
+      <section className={c.section}>
+        <motion.div {...fadeUp}>
+          <div className={c.kicker}>Live &amp; verified</div>
+          <h2 className={c.h2}>Deployed on Starknet mainnet. Every binding checked on-chain.</h2>
+          <p className={c.lead}>
+            Not a testnet demo. Five contracts live, wired, and reading a real Pragma price — with
+            96 Cairo tests behind them and honest docs about what is and isn&apos;t private.
+          </p>
+        </motion.div>
+        <div className={c.contracts}>
+          {[
+            ["AgentRegistry", MG.agentRegistry],
+            ["PragmaOracle", MG.oracle],
+            ["PerpEngine", MG.perpEngine],
+            ["OrderBook", MG.orderBook],
+            ["MarginGuardVenue", MG.venue],
+          ].map(([n, a], i) => (
+            <motion.div key={n} className={c.contractRow} {...fadeUp} transition={{ ...fadeUp.transition, delay: i * 0.06 }}>
+              <span className={c.contractName}>{n}</span>
+              <a className={`${c.contractAddr} ${c.mono}`} href={`${VOYAGER}${a}`} target="_blank" rel="noreferrer">
+                {`${a.slice(0, 10)}…${a.slice(-6)}`}
+              </a>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className={c.finalCta}>
+        <motion.div className={`${c.orb} ${c.orb2}`} style={{ left: "50%", transform: "translateX(-50%)", bottom: -200 }} animate={{ opacity: [0.35, 0.55, 0.35] }} transition={{ duration: 8, repeat: Infinity }} />
+        <motion.div className={c.finalInner} {...fadeUp}>
+          <h2 className={c.h2} style={{ margin: "0 auto", textAlign: "center" }}>Step into the dark pool.</h2>
+          <p className={c.lead} style={{ margin: "18px auto 30px", textAlign: "center" }}>
+            Build a real order, watch it become a commitment, and see the agent verification flow —
+            all against the live mainnet contracts.
+          </p>
+          <div className={c.heroCtas} style={{ justifyContent: "center" }}>
+            <a className={c.btnPrimary} href="/trade">Launch Terminal</a>
+            <a className={c.btnGhost} href="https://github.com/Stella112/marginguard" target="_blank" rel="noreferrer">Read the code</a>
+          </div>
+        </motion.div>
+      </section>
+
+      <footer className={c.footer}>
+        MarginGuard · STRK20 Private Sprint ·{" "}
+        <a href="https://github.com/Stella112/marginguard" target="_blank" rel="noreferrer">github.com/Stella112/marginguard</a>
+      </footer>
     </div>
   );
 }

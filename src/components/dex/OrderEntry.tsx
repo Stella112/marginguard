@@ -117,16 +117,20 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   const refreshBalances = useCallback(async () => {
     if (!account) return;
     try {
-      // Ask only for this market's two tokens. Passing [] would request *every* private
-      // balance the wallet holds — a far broader disclosure than this venue needs, and the
-      // reason Ready raised a "share all private balances" consent prompt.
-      // Normalize the requested addresses too. Config strings carry leading zeros
-      // ("0x04718f…"); if the wallet indexes notes by the canonical short form it returns
-      // balance 0 for a token the user demonstrably holds.
-      const raw: any = await account.strk20Balances([
-        num.toHex(marketConfig.baseToken),
-        num.toHex(marketConfig.quoteToken),
-      ]);
+      // Request the full shielded set and filter locally.
+      //
+      // The spec types `tokens` as FELT (`^0x(0|[a-fA-F1-9][a-fA-F0-9]{0,62})$` - leading
+      // zeros forbidden), and we send exactly that. But a wallet that indexes its notes by
+      // the zero-padded form and compares token addresses as *strings* will match nothing
+      // and hand back zeros for a token the user demonstrably holds. We cannot patch the
+      // wallet, so we stop relying on its filter: ask for everything, then compare
+      // numerically here with BigInt, which is immune to address formatting entirely.
+      //
+      // Cost: this asks the wallet to disclose all shielded balances rather than this
+      // market's two, so Ready raises its broader consent prompt. That is a real privacy
+      // trade-off, but it is local to the user's own browser - nothing leaves the page -
+      // and a balance that reads correctly is worth more than a narrower prompt that reads zero.
+      const raw: any = await account.strk20Balances([]);
       // Some wallet builds wrap the result as { value: [...] }; accept either shape.
       const entries: any[] = Array.isArray(raw) ? raw : (Array.isArray(raw?.value) ? raw.value : []);
       setDebug(`wallet returned ${entries.length} entr${entries.length === 1 ? "y" : "ies"}: ` +

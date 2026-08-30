@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, LockKeyhole, ShieldCheck, WalletCards } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import AppShell from "@/components/dex/AppShell";
-import { num } from "starknet";
 import { SPOT_MARKETS } from "@/utils/marginguard";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
 import styles from "@/app/terminal.module.css";
@@ -54,17 +53,10 @@ export default function OverviewPage() {
     if (!connected || !account) { setBalances(null); return; }
     let active = true;
     setBalanceError("");
-    // Scope the request to the tokens this venue actually trades. Passing [] asks the wallet
-    // to disclose *every* private balance it holds, which is what triggered Ready's
-    // "share all private balances" consent prompt.
-    // Normalized: config addresses carry leading zeros, which the wallet may not match
-    // against its own note index.
-    const tokens = Array.from(new Set(
-      SPOT_MARKETS.flatMap((m) => [m.baseToken, m.quoteToken])
-        .filter((t) => t && t !== "0x0")
-        .map((t) => num.toHex(t)),
-    ));
-    account.strk20Balances(tokens).then((raw: unknown) => {
+    // Ask for every shielded token rather than filtering by address in the request.
+    // The wallet's own token filter compares addresses as strings, so a padded/unpadded
+    // mismatch silently returns zero. Filtering numerically here (BigInt) cannot miss.
+    account.strk20Balances([]).then((raw: unknown) => {
       // Keep the untouched response so a zero reading can be diagnosed from real data.
       setRawResponse(JSON.stringify(raw));
       const rows = (raw as { value?: unknown })?.value ?? raw;
@@ -77,7 +69,8 @@ export default function OverviewPage() {
         const meta = labelForToken(token);
         return { asset: meta.asset, amount: formatUnits(rawAmount, meta.decimals), raw: rawAmount };
       });
-      if (active) setBalances(next);
+      // Requesting all tokens can return zero-balance rows; only real holdings belong here.
+      if (active) setBalances(next.filter((row) => row.raw > 0n));
     }).catch((error: unknown) => {
       if (!active) return;
       setBalances([]);

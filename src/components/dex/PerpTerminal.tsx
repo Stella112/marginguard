@@ -1,88 +1,116 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ExternalLink, EyeOff, Search, ShieldCheck } from "lucide-react";
-import { MG, readMarkPriceFor, readPosition, type PositionView } from "@/utils/marginguard";
+import { useEffect, useState } from "react";
+import { ExternalLink, EyeOff, ShieldCheck } from "lucide-react";
+import { MARK_BASE, MARK_QUOTE, MG, readEnginePrice } from "@/utils/marginguard";
+import { USDC_DECIMALS, formatUnits } from "./perpPackets";
 import PerpOrderEntry from "./PerpOrderEntry";
-import { fmtPrice } from "./data";
+import PerpDataPanel from "./PerpDataPanel";
+import TradeChart from "./TradeChart";
 import styles from "@/app/terminal.module.css";
 
-const explorer = "https://voyager.online/contract/";
+const CONTRACT = "https://voyager.online/contract/";
 
-export function PerpTerminal() {
-  const pageRef = useRef<HTMLDivElement>(null);
-  const [mark, setMark] = useState(0);
-  const [positionId, setPositionId] = useState("");
-  const [position, setPosition] = useState<PositionView | null>(null);
-  const [lookupError, setLookupError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    pageRef.current?.scrollTo({ top: 0, left: 0 });
-    readMarkPriceFor(MG_MARK_BASE).then(setMark).catch(() => {});
-  }, []);
-
-  async function lookup() {
-    if (!positionId.trim()) return;
-    setLoading(true);
-    setLookupError("");
-    try {
-      setPosition(await readPosition(positionId.trim()));
-    } catch (error: any) {
-      setPosition(null);
-      setLookupError(error?.message ?? "Position lookup failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+function Stat({ label, value, tone }: { label: string; value: string; tone?: "long" | "short" }) {
+  const color = tone === "long" ? styles.statCyan : tone === "short" ? styles.statPurple : "";
   return (
-    <div ref={pageRef} className={styles.perpPage}>
-      <div className={styles.perpHero}>
-        <div>
-          <span className={styles.perpKicker}>PRIVATE PERPETUALS</span>
-          <h1>PerpEngine</h1>
-          <p>Leveraged positions remain commitments until an owner, keeper, or registered agent presents the matching reveal.</p>
-        </div>
-        <span className={styles.perpStatus}><span className={styles.networkDot} />MAINNET CONTRACT DEPLOYED</span>
-      </div>
-
-      <div className={styles.perpGrid}>
-        <section className={styles.perpCard}>
-          <div className={styles.panelHeader}><span>STRK-PERP</span><span className={styles.subtleTag}>PRIVATE</span></div>
-          <div className={styles.perpMetric}><span>Verified oracle mark</span><strong className={`${styles.tnum} ${styles.statCyan}`}>{fmtPrice(mark)}</strong></div>
-          <div className={styles.perpMetric}><span>Leverage tiers</span><strong className={styles.tnum}>2x&nbsp;&nbsp;5x&nbsp;&nbsp;10x</strong></div>
-          <div className={styles.perpMetric}><span>Position economics</span><strong><EyeOff size={14} /> shielded</strong></div>
-          <a className={styles.contractLink} href={`${explorer}${MG.perpEngine}`} target="_blank" rel="noreferrer">View PerpEngine <ExternalLink size={12} /></a>
-        </section>
-
-        <section className={styles.perpCard}>
-          <div className={styles.panelHeader}><span>Agent risk layer</span><ShieldCheck size={15} className={styles.statCyan} /></div>
-          <div className={styles.perpCopy}>The registered agent proposes a bounded adjustment. PerpEngine verifies the signature, policy, nonce, and committed position before enforcement.</div>
-          <div className={styles.riskRows}><span>Max margin increase <b>50%</b></span><span>Max size reduction <b>30%</b></span><span>May close <b>Yes</b></span></div>
-          <a className={styles.contractLink} href={`${explorer}${MG.agentRegistry}`} target="_blank" rel="noreferrer">View AgentRegistry <ExternalLink size={12} /></a>
-        </section>
-
-        <section className={styles.perpCard}>
-          <div className={styles.panelHeader}><span>Position lookup</span><Search size={14} /></div>
-          <div className={styles.lookupRow}>
-            <input value={positionId} onChange={(event) => setPositionId(event.target.value)} placeholder="0x… position id" aria-label="Position id" />
-            <button onClick={lookup} disabled={loading || !positionId.trim()}>{loading ? "Reading" : "Look up"}</button>
-          </div>
-          {lookupError && <p className={styles.errorText}>{lookupError}</p>}
-          {position && <div className={styles.positionResult}>
-            <span>Status <b>{position.open ? "OPEN" : position.liquidated ? "LIQUIDATED" : position.exists ? "CLOSED" : "NOT FOUND"}</b></span>
-            <span>Commitment <b className={styles.tnum}>{position.exists ? `${position.commitment.slice(0, 10)}…${position.commitment.slice(-6)}` : "—"}</b></span>
-          </div>}
-          {!position && !lookupError && <div className={styles.emptyPerp}>No position loaded. Position values are not enumerable from public state.</div>}
-        </section>
-
-        <PerpOrderEntry />
-      </div>
+    <div className={styles.stat}>
+      <span className={styles.statLabel}>{label}</span>
+      <span className={`${styles.tnum} ${styles.statValue} ${color}`}>{value}</span>
     </div>
   );
 }
 
-const MG_MARK_BASE = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+export function PerpTerminal() {
+  const [enginePrice, setEnginePrice] = useState<bigint | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const load = () => readEnginePrice(MARK_BASE, MARK_QUOTE)
+      .then((p) => { if (active) setEnginePrice(p); })
+      .catch(() => {});
+    load();
+    const timer = window.setInterval(load, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  const markText = enginePrice ? `$${formatUnits(enginePrice, USDC_DECIMALS, 5)}` : "-";
+  // The chart takes a plain number; the engine scale is quote-smallest per base-smallest.
+  const markNumber = enginePrice ? Number(enginePrice) / 10 ** USDC_DECIMALS : 0;
+
+  return (
+    <>
+      <div className={styles.marketBar}>
+        <div className={styles.marketSelect}>
+          <div className={styles.marketButton}>
+            <span className={styles.marketSymbol}>STRK-PERP</span>
+            <span className={styles.privateFlag}>PRIVATE</span>
+          </div>
+        </div>
+
+        <div className={styles.marketDivider} />
+
+        <div className={styles.statStrip}>
+          <Stat label="Mark Price" value={markText} tone="long" />
+          <Stat label="Oracle Price" value={markText} />
+          <Stat label="Max Leverage" value="10x" />
+          <Stat label="Maintenance" value="50%" tone="short" />
+          <Stat label="Open Interest" value="Not enumerable" />
+        </div>
+      </div>
+
+      <div className={styles.tradeGrid}>
+        {/* Left: chart over the positions panel, matching the spot terminal. */}
+        <div className={`${styles.mainColumn} ${styles.borderRight}`}>
+          <TradeChart market="STRK/USDC" mark={markNumber} />
+          <PerpDataPanel mark={enginePrice} />
+        </div>
+
+        {/* Middle: no order book by design. Perp positions are commitments, not resting
+            orders, so there is no depth to display - the engine's verified risk terms go
+            here instead of a book that would have to be fabricated. */}
+        <section className={styles.panel} style={{ display: "flex", flexDirection: "column", overflowY: "auto" }}>
+          <div className={styles.panelHeader}>
+            <span>Engine &amp; risk</span>
+            <span className={styles.subtleTag}>VERIFIED</span>
+          </div>
+
+          <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+            <div className={styles.collateralRow}><span>Leverage tiers</span><span className={styles.collateralValue}>2x &nbsp;5x &nbsp;10x</span></div>
+            <div className={styles.collateralRow}><span>Maintenance margin</span><span className={styles.collateralValue}>50%</span></div>
+            <div className={styles.collateralRow}><span>Settlement</span><span className={styles.collateralValue}>USDC</span></div>
+            <div className={styles.collateralRow}><span>Position economics</span><span className={styles.collateralValue}><EyeOff size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />shielded</span></div>
+          </div>
+
+          <div className={styles.panelHeader} style={{ marginTop: 6 }}>
+            <span>Agent risk layer</span>
+            <ShieldCheck size={14} className={styles.statCyan} />
+          </div>
+          <div style={{ padding: "8px 12px", fontSize: 11, lineHeight: 1.55, color: "rgba(255,255,255,0.55)" }}>
+            The registered agent proposes a bounded adjustment. PerpEngine verifies the signature,
+            policy, nonce and committed position before any of it is enforced.
+          </div>
+          <div style={{ padding: "0 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+            <div className={styles.collateralRow}><span>Max margin increase</span><span className={styles.collateralValue}>50%</span></div>
+            <div className={styles.collateralRow}><span>Max size reduction</span><span className={styles.collateralValue}>30%</span></div>
+            <div className={styles.collateralRow}><span>May close</span><span className={styles.collateralValue}>Yes</span></div>
+          </div>
+
+          <div style={{ padding: "12px", marginTop: "auto", display: "flex", flexDirection: "column", gap: 7 }}>
+            <a className={styles.contractLink} href={`${CONTRACT}${MG.perpEngine}`} target="_blank" rel="noreferrer">
+              View PerpEngine <ExternalLink size={12} />
+            </a>
+            <a className={styles.contractLink} href={`${CONTRACT}${MG.agentRegistry}`} target="_blank" rel="noreferrer">
+              View AgentRegistry <ExternalLink size={12} />
+            </a>
+          </div>
+        </section>
+
+        {/* Right: order entry */}
+        <PerpOrderEntry enginePrice={enginePrice} />
+      </div>
+    </>
+  );
+}
 
 export default PerpTerminal;

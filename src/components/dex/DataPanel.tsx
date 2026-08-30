@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { STRK20_ACTION } from "@starknet-io/types-js";
+import { num } from "starknet";
 import { Database, ExternalLink, EyeOff, GitMerge, KeyRound, LockKeyhole } from "lucide-react";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
 import { MG, readOrderState, readProvider } from "@/utils/marginguard";
@@ -134,12 +135,14 @@ export function DataPanel() {
     try {
       setBusy(`claim:${order.orderId}`);
       setNotice("Confirm the STRK20 claim. The matched payout will be credited to an open note.");
+      // Addresses are hex-normalized for the wallet; the "OPEN" and ${openNoteIds[0]}
+      // placeholders are literal strings and must NOT be normalized.
       const actions: STRK20_ACTION[] = [
-        { type: "transfer", token: payoutToken, amount: "OPEN", recipient: account.address },
+        { type: "transfer", token: num.toHex(payoutToken), amount: "OPEN", recipient: num.toHex(account.address) },
         {
           type: "invoke",
-          contract: MG.venue,
-          calldata: ["0x1", "0x0", "0x0", "0x0", order.ownerSecret, order.orderId, order.side === "buy" ? "0x0" : "0x1", order.priceUnits, order.sizeUnits, order.salt, "${openNoteIds[0]}"],
+          contract: num.toHex(MG.venue),
+          calldata: ["0x1", "0x0", "0x0", "0x0", num.toHex(order.ownerSecret), num.toHex(order.orderId), order.side === "buy" ? "0x0" : "0x1", order.priceUnits, order.sizeUnits, num.toHex(order.salt), "${openNoteIds[0]}"],
         },
       ];
       const result = await account.strk20InvokeTransaction(actions);

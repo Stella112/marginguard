@@ -106,6 +106,9 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   // null = not checked yet. Read straight from the pool so the UI can state registration
   // status up front rather than surfacing NOT_REGISTERED mid-transaction.
   const [registered, setRegistered] = useState<boolean | null>(null);
+  // Raw wallet response summary — surfaced in the UI so a balance mismatch can be diagnosed
+  // from what the wallet actually returned rather than guessed at.
+  const [debug, setDebug] = useState("");
 
   useEffect(() => {
     if (mark && !price) setPrice(mark.toFixed(6));
@@ -117,10 +120,14 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       // Ask only for this market's two tokens. Passing [] would request *every* private
       // balance the wallet holds — a far broader disclosure than this venue needs, and the
       // reason Ready raised a "share all private balances" consent prompt.
-      const entries: any[] = await account.strk20Balances([
+      const raw: any = await account.strk20Balances([
         marketConfig.baseToken,
         marketConfig.quoteToken,
       ]);
+      // Some wallet builds wrap the result as { value: [...] }; accept either shape.
+      const entries: any[] = Array.isArray(raw) ? raw : (Array.isArray(raw?.value) ? raw.value : []);
+      setDebug(`wallet returned ${entries.length} entr${entries.length === 1 ? "y" : "ies"}: ` +
+        (entries.length ? entries.map((e: any) => `${String(e?.token ?? e?.token_address ?? "?").slice(0, 10)}…=${String(e?.balance ?? e?.amount ?? "?")}`).join("  ") : JSON.stringify(raw).slice(0, 120)));
       const next: Record<string, bigint> = {};
       for (const entry of entries ?? []) {
         const token = entry?.token ?? entry?.token_address;
@@ -133,9 +140,10 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         }
       }
       setShielded(next);
-    } catch {
+    } catch (error: any) {
       // The wallet refused (no STRK20 support, or consent declined).
       setShielded(null);
+      setDebug(`balance read failed: ${error?.message ?? String(error)}`.slice(0, 160));
     }
   }, [account, marketConfig.baseToken, marketConfig.quoteToken]);
 
@@ -173,7 +181,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       if (amount <= 0n) throw new Error("Enter an amount greater than zero.");
       setMessage("Confirm the deposit in your wallet. This moves public tokens into the STRK20 pool.");
       const result = await account.strk20InvokeTransaction([
-        { type: "deposit", token: depositToken, amount: num.toHex(amount) },
+        { type: "deposit", token: num.toHex(depositToken), amount: num.toHex(amount) },
       ] as STRK20_ACTION[]);
       setTxHash(result.transaction_hash);
       await waitFor(result.transaction_hash);
@@ -272,19 +280,24 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       // tokens are not already there. An invoke-only STRK20 transaction moves nothing (and
       // the wallet rejects it as a malformed payload), so the withdraw leg is required.
       // Phase order is enforced by the protocol: Withdraw (6) precedes InvokeExternal (7).
+      // Every address is hex-normalized before it reaches the wallet. The starter kit's
+      // working helper-invoke does the same: config strings carry leading zeros
+      // ("0x04718f…") which the wallet rejects as a malformed payload.
+      const venueAddr = num.toHex(MG.venue);
+      const reserveTokenHex = num.toHex(reserveToken);
       const fundActions: STRK20_ACTION[] = [
         {
           type: "withdraw",
-          token: reserveToken,
+          token: reserveTokenHex,
           amount: num.toHex(reserveAmount),
-          recipient: MG.venue,
+          recipient: venueAddr,
         },
         {
           type: "invoke",
-          contract: MG.venue,
+          contract: venueAddr,
           // VenueOperation::Fund plus the remaining positional fields. Fund returns an
           // empty span, so no OPEN note is needed for this leg.
-          calldata: ["0x0", trader, reserveToken, num.toHex(reserveAmount), ZERO, ZERO, "0x0", ZERO, ZERO, ZERO, ZERO],
+          calldata: ["0x0", num.toHex(trader), reserveTokenHex, num.toHex(reserveAmount), ZERO, ZERO, "0x0", ZERO, ZERO, ZERO, ZERO],
         },
       ];
       const funded = await account.strk20InvokeTransaction(fundActions);
@@ -414,6 +427,17 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
             </button>
           </span>
         </div>
+
+        {debug && (
+          <div style={{
+            margin: "6px 0", padding: "6px 8px", borderRadius: 5, fontSize: 9.5, lineHeight: 1.45,
+            fontFamily: "ui-monospace, monospace", wordBreak: "break-all",
+            border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)",
+            color: "rgba(255,255,255,0.5)",
+          }}>
+            {debug}
+          </div>
+        )}
 
         {showDeposit && (
           <div style={{ padding: "8px 0 4px" }}>

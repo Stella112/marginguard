@@ -41,6 +41,31 @@ function quoteAmount(size: bigint, price: bigint): bigint {
   return (size * price) / 10n ** 18n;
 }
 
+/**
+ * Turns a raw STRK20 wallet error into something a user can act on. The wallet API's
+ * documented failures are NOT_REGISTERED, INSUFFICIENT_PRIVATE_BALANCE, PRIVACY_LEAK,
+ * INVALID_REQUEST_PAYLOAD and USER_REFUSED_OP.
+ */
+function explainStrk20Error(error: any): string {
+  const raw = error?.message ?? error?.toString?.() ?? "The request was not submitted.";
+  if (raw.includes("NOT_REGISTERED")) {
+    return "Your wallet is not registered with the STRK20 privacy pool yet. Registration is handled by the wallet, not by this app: open Ready, use its privacy/shield feature once to register a viewing key, then come back and retry.";
+  }
+  if (raw.includes("INSUFFICIENT_PRIVATE_BALANCE")) {
+    return "Not enough shielded balance for this action. Shield more of this token first.";
+  }
+  if (raw.includes("USER_REFUSED_OP")) {
+    return "You declined the request in the wallet.";
+  }
+  if (raw.includes("PRIVACY_LEAK")) {
+    return "The wallet blocked this request because it would have leaked private state.";
+  }
+  if (raw.includes("INVALID_REQUEST_PAYLOAD")) {
+    return "The wallet rejected the STRK20 request format. Make sure you are on a wallet with STRK20 Wallet API 0.10.3+ (Ready or Xverse) and reconnect.";
+  }
+  return raw;
+}
+
 function shortHash(hash: string): string {
   return hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
 }
@@ -74,6 +99,9 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   const [shielded, setShielded] = useState<Record<string, bigint> | null>(null);
   const [depositAmount, setDepositAmount] = useState("");
   const [showDeposit, setShowDeposit] = useState(false);
+  // Which token to shield. Defaults to whatever the current side reserves, but the user can
+  // shield either leg independently — funding and order side are separate concerns.
+  const [depositAsset, setDepositAsset] = useState<"base" | "quote">("quote");
 
   useEffect(() => {
     if (mark && !price) setPrice(mark.toFixed(6));
@@ -126,10 +154,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       setShowDeposit(false);
       refreshBalances();
     } catch (error: any) {
-      const raw = error?.message ?? String(error);
-      setMessage(raw.includes("INVALID_REQUEST_PAYLOAD")
-        ? "The connected wallet rejected the STRK20 request. Use a wallet with STRK20 Wallet API support (Ready or Xverse) and reconnect."
-        : raw);
+      setMessage(explainStrk20Error(error));
     } finally {
       setBusy(false);
     }
@@ -140,13 +165,19 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   const notional = sizeN * priceN;
   const reserveLabel = side === "buy" ? "USDC" : "STRK";
   const accent = side === "buy" ? styles.submitLong : styles.submitShort;
-  // A buy reserves quote (USDC); a sell reserves base (STRK). Shield whichever the order needs.
-  const depositToken = side === "buy" ? marketConfig.quoteToken : marketConfig.baseToken;
-  const depositDecimals = side === "buy" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
-  const shieldedRaw = shielded ? shielded[depositToken.toLowerCase()] ?? 0n : null;
+  // A buy reserves quote (USDC); a sell reserves base (STRK). The deposit panel can shield
+  // either, independently of the current side.
+  const baseSymbol = marketConfig.symbol.split("/")[0];
+  const depositToken = depositAsset === "quote" ? marketConfig.quoteToken : marketConfig.baseToken;
+  const depositDecimals = depositAsset === "quote" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
+  const depositSymbol = depositAsset === "quote" ? marketConfig.quoteSymbol : baseSymbol;
+  // The balance shown alongside the order is the one that order will actually reserve.
+  const reserveToken = side === "buy" ? marketConfig.quoteToken : marketConfig.baseToken;
+  const reserveDecimals = side === "buy" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
+  const shieldedRaw = shielded ? shielded[reserveToken.toLowerCase()] ?? 0n : null;
   const shieldedDisplay = shieldedRaw === null
     ? "Wallet consent required"
-    : `${(Number(shieldedRaw) / 10 ** depositDecimals).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${reserveLabel}`;
+    : `${(Number(shieldedRaw) / 10 ** reserveDecimals).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${reserveLabel}`;
 
   async function waitFor(tx: string) {
     const receipt: any = await readProvider().waitForTransaction(tx, { retries: 120, retryInterval: 3000 });
@@ -255,10 +286,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       window.dispatchEvent(new Event("marginguard:orders"));
       setMessage(`Order live. It is backed by ${reserveAmount.toString()} ${reserveLabel} units and waiting for a counterparty.`);
     } catch (error: any) {
-      const raw = error?.message ?? error?.toString?.() ?? "The order was not submitted.";
-      setMessage(raw.includes("INVALID_REQUEST_PAYLOAD")
-        ? "The connected wallet rejected the STRK20 request format. Use a wallet with STRK20 Wallet API support, such as Ready or Xverse, then reconnect."
-        : raw);
+      setMessage(explainStrk20Error(error));
     } finally {
       setBusy(false);
     }
@@ -296,27 +324,52 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         </div>
 
         {showDeposit && (
-          <div style={{ display: "flex", gap: 6, padding: "8px 0 4px" }}>
-            <input
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder={`Amount in ${reserveLabel}`}
-              className={styles.input}
-              style={{ flex: 1 }}
-            />
-            <button
-              type="button"
-              onClick={shieldTokens}
-              disabled={busy || !depositAmount}
-              style={{
-                padding: "0 12px", fontSize: 11, fontWeight: 700, borderRadius: 6,
-                cursor: busy || !depositAmount ? "not-allowed" : "pointer",
-                border: "none", background: "#00e5ff", color: "#06121a",
-                opacity: busy || !depositAmount ? 0.5 : 1,
-              }}
-            >
-              {busy ? "…" : "DEPOSIT"}
-            </button>
+          <div style={{ padding: "8px 0 4px" }}>
+            {/* Choose which token to shield — independent of the order side. */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+              {(["quote", "base"] as const).map((which) => {
+                const label = which === "quote" ? marketConfig.quoteSymbol : baseSymbol;
+                const on = depositAsset === which;
+                return (
+                  <button
+                    key={which}
+                    type="button"
+                    onClick={() => setDepositAsset(which)}
+                    style={{
+                      flex: 1, padding: "5px 0", fontSize: 10.5, fontWeight: 700, borderRadius: 5,
+                      cursor: "pointer",
+                      border: `1px solid ${on ? "rgba(0,229,255,0.55)" : "rgba(255,255,255,0.12)"}`,
+                      background: on ? "rgba(0,229,255,0.14)" : "transparent",
+                      color: on ? "#00e5ff" : "rgba(255,255,255,0.45)",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
+                placeholder={`Amount in ${depositSymbol}`}
+                className={styles.input}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={shieldTokens}
+                disabled={busy || !depositAmount}
+                style={{
+                  padding: "0 12px", fontSize: 11, fontWeight: 700, borderRadius: 6,
+                  cursor: busy || !depositAmount ? "not-allowed" : "pointer",
+                  border: "none", background: "#00e5ff", color: "#06121a",
+                  opacity: busy || !depositAmount ? 0.5 : 1,
+                }}
+              >
+                {busy ? "…" : "DEPOSIT"}
+              </button>
+            </div>
           </div>
         )}
 

@@ -17,7 +17,7 @@ import styles from "@/app/terminal.module.css";
  */
 export default function TradePage() {
   const [product, setProduct] = useState<"spot" | "perps">("spot");
-  const [market, setMarket] = useState("STRK/USDC");
+  const [market, setMarket] = useState("ETH/USDC");
   const [mark, setMark] = useState(0);
   const [priceSource, setPriceSource] = useState("Pragma oracle · live");
   const selected = SPOT_MARKETS.find((item) => item.symbol === market) ?? SPOT_MARKETS[0];

@@ -10,6 +10,7 @@ import { useStoreWallet } from "@/app/components/Wallet/walletContext";
 import {
   MG,
   SPOT_MARKETS,
+  MARK_BASE,
   SIDE_BUY,
   SIDE_SELL,
   orderCommitment,
@@ -103,6 +104,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   // Which token to shield. Defaults to whatever the current side reserves, but the user can
   // shield either leg independently — funding and order side are separate concerns.
   const [depositAsset, setDepositAsset] = useState<"base" | "quote">("quote");
+  const [recoverAmount, setRecoverAmount] = useState("");
   // null = not checked yet. Read straight from the pool so the UI can state registration
   // status up front rather than surfacing NOT_REGISTERED mid-transaction.
   const [registered, setRegistered] = useState<boolean | null>(null);
@@ -203,12 +205,48 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
     }
   }
 
+  /**
+   * Withdraws a shielded balance back to the connected wallet's public address.
+   *
+   * Ready only reports shielded balances for the tokens in its own display set
+   * (USDC.e, ETH, WBTC). A STRK note deposited into the pool is real - the pool
+   * records the channel - but neither the wallet nor this app can read it back.
+   * Action compiling is token-agnostic, so an explicit withdraw still recovers it.
+   */
+  async function unshieldTokens(token: string, decimals: number, label: string, amountText: string) {
+    setMessage("");
+    setTxHash("");
+    if (!account || !connected) {
+      setMessage("Connect a Starknet wallet first.");
+      return;
+    }
+    try {
+      setBusy(true);
+      const amount = parseUnits(amountText, decimals);
+      if (amount <= 0n) throw new Error("Enter an amount greater than zero.");
+      setMessage(`Confirm the withdrawal. This moves ${label} out of the pool back to your public balance.`);
+      const result = await account.strk20InvokeTransaction([
+        { type: "withdraw", token: num.toHex(token), amount: num.toHex(amount), recipient: num.toHex(account.address) },
+      ] as STRK20_ACTION[]);
+      setTxHash(result.transaction_hash);
+      await waitFor(result.transaction_hash);
+      setMessage(`Unshielded ${amountText} ${label}. It is back in your public wallet balance.`);
+      setRecoverAmount("");
+      refreshBalances();
+    } catch (error: any) {
+      setMessage(explainStrk20Error(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const sizeN = Number(size) || 0;
   const priceN = Number(price) || mark;
   const notional = sizeN * priceN;
-  const reserveLabel = side === "buy" ? "USDC" : "STRK";
+  // Labels follow the selected market, not the old STRK-only build.
+  const reserveLabel = side === "buy" ? marketConfig.quoteSymbol : marketConfig.symbol.split("/")[0];
   const accent = side === "buy" ? styles.submitLong : styles.submitShort;
-  // A buy reserves quote (USDC); a sell reserves base (STRK). The deposit panel can shield
+  // A buy reserves the quote leg; a sell reserves the base leg. The deposit panel can shield
   // either, independently of the current side.
   const baseSymbol = marketConfig.symbol.split("/")[0];
   const depositToken = depositAsset === "quote" ? marketConfig.quoteToken : marketConfig.baseToken;
@@ -492,6 +530,41 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
               >
                 {busy ? "…" : "DEPOSIT"}
               </button>
+            </div>
+
+            {/* Recovery path for shielded STRK.
+
+                STRK is not in Ready's shielded-token display set, so a STRK note in the
+                pool is invisible to both the wallet and this app even though the pool
+                records it. Withdrawing is token-agnostic, so it can still be brought back
+                out to the public balance. */}
+            <div style={{ marginTop: 10, paddingTop: 9, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <div style={{ fontSize: 10, lineHeight: 1.5, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>
+                Shielded STRK from an earlier deposit? Your wallet cannot display it, but it is
+                still in the pool. Withdraw it back to your public balance here.
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  value={recoverAmount}
+                  onChange={(e) => setRecoverAmount(e.target.value)}
+                  placeholder="Amount in STRK"
+                  className={styles.input}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => unshieldTokens(MARK_BASE, 18, "STRK", recoverAmount)}
+                  disabled={busy || !recoverAmount}
+                  style={{
+                    padding: "0 12px", fontSize: 11, fontWeight: 700, borderRadius: 6,
+                    cursor: busy || !recoverAmount ? "not-allowed" : "pointer",
+                    border: "1px solid rgba(157,78,221,0.5)", background: "rgba(157,78,221,0.16)",
+                    color: "#d8bcff", opacity: busy || !recoverAmount ? 0.5 : 1,
+                  }}
+                >
+                  {busy ? "…" : "UNSHIELD"}
+                </button>
+              </div>
             </div>
           </div>
         )}

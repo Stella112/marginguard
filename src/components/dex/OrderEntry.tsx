@@ -187,9 +187,20 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   const reserveToken = side === "buy" ? marketConfig.quoteToken : marketConfig.baseToken;
   const reserveDecimals = side === "buy" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
   const shieldedRaw = shielded ? shielded[reserveToken.toLowerCase()] ?? 0n : null;
-  const shieldedDisplay = shieldedRaw === null
-    ? "Wallet consent required"
-    : `${(Number(shieldedRaw) / 10 ** reserveDecimals).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${reserveLabel}`;
+
+  /** Formats a shielded balance for one leg, so both tokens are visible at once. */
+  const legBalance = (which: "base" | "quote") => {
+    const token = which === "quote" ? marketConfig.quoteToken : marketConfig.baseToken;
+    const decimals = which === "quote" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
+    const symbol = which === "quote" ? marketConfig.quoteSymbol : baseSymbol;
+    if (!shielded) return { symbol, text: "—" };
+    const raw = shielded[token.toLowerCase()] ?? 0n;
+    return {
+      symbol,
+      text: `${(Number(raw) / 10 ** decimals).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${symbol}`,
+      zero: raw === 0n,
+    };
+  };
 
   async function waitFor(tx: string) {
     const receipt: any = await readProvider().waitForTransaction(tx, { retries: 120, retryInterval: 3000 });
@@ -338,7 +349,40 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         <div className={styles.collateralRow}>
           <span><LockKeyhole size={11} style={{ verticalAlign: "-2px", marginRight: 5 }} />Shielded balance</span>
           <span className={styles.collateralValue}>
-            {shieldedDisplay}
+            {/* Both legs are shown: shielding STRK must not look like "nothing happened"
+                just because the current side reserves USDC. */}
+            <span style={{ display: "inline-flex", gap: 10, marginRight: 8 }}>
+              {(["base", "quote"] as const).map((which) => {
+                const leg = legBalance(which);
+                const isReserve = (which === "quote") === (side === "buy");
+                return (
+                  <span
+                    key={which}
+                    title={isReserve ? "Reserved by this order" : undefined}
+                    style={{
+                      color: leg.zero ? "rgba(255,255,255,0.35)" : "#8ef0ff",
+                      fontWeight: isReserve ? 700 : 400,
+                    }}
+                  >
+                    {leg.text}
+                  </span>
+                );
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => refreshBalances()}
+              disabled={!connected || busy}
+              title="Re-read shielded balances from the wallet"
+              style={{
+                marginRight: 6, padding: "2px 7px", fontSize: 10, fontWeight: 700,
+                borderRadius: 4, cursor: connected && !busy ? "pointer" : "not-allowed",
+                border: "1px solid rgba(255,255,255,0.18)", background: "transparent",
+                color: "rgba(255,255,255,0.6)",
+              }}
+            >
+              ↻
+            </button>
             <button
               type="button"
               onClick={() => setShowDeposit((v) => !v)}

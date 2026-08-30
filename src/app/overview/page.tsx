@@ -47,6 +47,8 @@ export default function OverviewPage() {
   const [balanceError, setBalanceError] = useState("");
   // Bumped by the retry control so a declined consent prompt can be re-requested.
   const [reloadKey, setReloadKey] = useState(0);
+  // Untouched wallet response, shown when every balance reads zero.
+  const [rawResponse, setRawResponse] = useState("");
 
   useEffect(() => {
     if (!connected || !account) { setBalances(null); return; }
@@ -63,11 +65,15 @@ export default function OverviewPage() {
         .map((t) => num.toHex(t)),
     ));
     account.strk20Balances(tokens).then((raw: unknown) => {
+      // Keep the untouched response so a zero reading can be diagnosed from real data.
+      setRawResponse(JSON.stringify(raw));
       const rows = (raw as { value?: unknown })?.value ?? raw;
       if (!Array.isArray(rows)) throw new Error("Unexpected shielded balance response");
       const next = rows.map((row: any) => {
         const token = String(row?.token ?? row?.token_address ?? row?.[0]);
-        const rawAmount = BigInt(row?.balance ?? row?.amount ?? row?.[1] ?? 0);
+        // `amount` first, matching the repo's working reference parser: some wallet builds
+        // carry both fields and `balance` can be a zero placeholder.
+        const rawAmount = BigInt(row?.amount ?? row?.balance ?? row?.[1] ?? 0);
         const meta = labelForToken(token);
         return { asset: meta.asset, amount: formatUnits(rawAmount, meta.decimals), raw: rawAmount };
       });
@@ -100,6 +106,24 @@ export default function OverviewPage() {
   return <AppShell><div className={styles.overview}><div className={styles.overviewInner}>
     <div className={styles.overviewHeader}><div><div className={styles.eyebrow}>Account / private risk surface</div><h1 className={styles.overviewTitle}>Portfolio overview</h1><p className={styles.overviewDescription}>Read-only balances from your privacy-enabled wallet. Position economics remain private commitments.</p></div><div className={styles.overviewAddress}>{address}</div></div>
     <div className={styles.metricGrid}><Metric label="Net shielded value" value="—" sub={connected ? "Value feed not configured" : "Connect wallet to load"} icon={<LockKeyhole size={15} />} /><Metric label="Free collateral" value="—" sub="Not exposed by public chain state" icon={<WalletCards size={15} />} /><Metric label="Initial margin requirement" value="—" sub="Loaded from position view, not indexed" icon={<AlertTriangle size={15} />} /></div>
+
+    {connected && rawResponse && (balances ?? []).every((b) => b.raw === 0n) && (
+      <div style={{
+        margin: "0 0 14px", padding: "10px 12px", borderRadius: 8,
+        border: "1px solid rgba(157,78,221,0.4)", background: "rgba(157,78,221,0.08)",
+        fontSize: 11, lineHeight: 1.5, color: "#d8bcff",
+      }}>
+        <strong style={{ display: "block", marginBottom: 4 }}>
+          Every balance read zero — raw wallet response:
+        </strong>
+        <code style={{
+          display: "block", wordBreak: "break-all", fontFamily: "ui-monospace, monospace",
+          fontSize: 10.5, color: "rgba(255,255,255,0.75)",
+        }}>
+          {rawResponse.slice(0, 600)}
+        </code>
+      </div>
+    )}
 
     <div className={styles.overviewGrid}><section className={styles.allocation}><div className={styles.sectionTitle}>Shielded allocation</div><div className={styles.sectionSub}>Derived from the wallet’s private balance response.</div><div className={styles.donut}>{allocation.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={allocation} dataKey="value" innerRadius={68} outerRadius={96} paddingAngle={2} stroke="none">{allocation.map((item) => <Cell key={item.name} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer> : <div className={styles.privateEmpty}><LockKeyhole size={16} /><strong>{connected ? "No shielded balances" : "Wallet not connected"}</strong><span>{balanceError || "Connect a privacy-enabled Starknet wallet to read notes."}</span>{connected && balanceError ? <button onClick={() => setReloadKey((k) => k + 1)} style={{ marginTop: 10, padding: "6px 14px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer", border: "1px solid rgba(0,229,255,0.45)", background: "rgba(0,229,255,0.12)", color: "#00e5ff" }}>Request balances again</button> : null}</div>}<div className={styles.donutCenter}><span className={styles.donutLabel}>Assets</span><span className={styles.donutValue}>{balances?.length ?? "—"}</span></div></div><div className={styles.legend}>{allocation.map((item) => <div key={item.name} className={styles.legendRow}><span className={styles.legendSwatch} style={{ background: item.color }} /><span>{item.name}</span><strong>loaded</strong></div>)}</div></section>
 

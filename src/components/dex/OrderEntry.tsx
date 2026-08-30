@@ -130,11 +130,11 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       // Some wallet builds wrap the result as { value: [...] }; accept either shape.
       const entries: any[] = Array.isArray(raw) ? raw : (Array.isArray(raw?.value) ? raw.value : []);
       setDebug(`wallet returned ${entries.length} entr${entries.length === 1 ? "y" : "ies"}: ` +
-        (entries.length ? entries.map((e: any) => `${String(e?.token ?? e?.token_address ?? "?").slice(0, 10)}…=${String(e?.balance ?? e?.amount ?? "?")}`).join("  ") : JSON.stringify(raw).slice(0, 120)));
+        (entries.length ? entries.map((e: any) => `${String(e?.token ?? e?.token_address ?? "?").slice(0, 10)}…=${String(e?.amount ?? e?.balance ?? "?")}`).join("  ") : JSON.stringify(raw).slice(0, 120)));
       const next: Record<string, bigint> = {};
       for (const entry of entries ?? []) {
         const token = entry?.token ?? entry?.token_address;
-        const balance = entry?.balance ?? entry?.amount;
+        const balance = entry?.amount ?? entry?.balance;
         if (token !== undefined && balance !== undefined) {
           // Key by the numeric value, not the hex string. Starknet addresses are written
           // with and without leading zeros ("0x04718f…" vs "0x4718f…"), so string keys

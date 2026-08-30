@@ -20,8 +20,14 @@ const formatUnits = (raw: bigint, decimals: number) => {
 
 function labelForToken(token: string) {
   try {
-    const match = SPOT_MARKETS.find((market) => BigInt(market.baseToken) === BigInt(token));
-    return match ? { asset: match.symbol, decimals: match.baseDecimals } : { asset: "Token", decimals: 18 };
+    const value = BigInt(token);
+    // Match the base leg of any market...
+    const base = SPOT_MARKETS.find((market) => BigInt(market.baseToken) === value);
+    if (base) return { asset: base.symbol.split("/")[0], decimals: base.baseDecimals };
+    // ...or the shared quote leg, which is otherwise unlabelled.
+    const quote = SPOT_MARKETS.find((market) => BigInt(market.quoteToken) === value);
+    if (quote) return { asset: quote.quoteSymbol, decimals: quote.quoteDecimals };
+    return { asset: "Token", decimals: 18 };
   } catch { return { asset: "Token", decimals: 18 }; }
 }
 

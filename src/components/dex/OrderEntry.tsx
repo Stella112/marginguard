@@ -126,7 +126,10 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         const token = entry?.token ?? entry?.token_address;
         const balance = entry?.balance ?? entry?.amount;
         if (token !== undefined && balance !== undefined) {
-          next[num.toHex(token).toLowerCase()] = BigInt(balance);
+          // Key by the numeric value, not the hex string. Starknet addresses are written
+          // with and without leading zeros ("0x04718f…" vs "0x4718f…"), so string keys
+          // silently miss and every balance reads as zero.
+          next[BigInt(token).toString()] = BigInt(balance);
         }
       }
       setShielded(next);
@@ -199,7 +202,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   // The balance shown alongside the order is the one that order will actually reserve.
   const reserveToken = side === "buy" ? marketConfig.quoteToken : marketConfig.baseToken;
   const reserveDecimals = side === "buy" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
-  const shieldedRaw = shielded ? shielded[reserveToken.toLowerCase()] ?? 0n : null;
+  const shieldedRaw = shielded ? shielded[BigInt(reserveToken).toString()] ?? 0n : null;
 
   /** Formats a shielded balance for one leg, so both tokens are visible at once. */
   const legBalance = (which: "base" | "quote") => {
@@ -207,7 +210,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
     const decimals = which === "quote" ? marketConfig.quoteDecimals : marketConfig.baseDecimals;
     const symbol = which === "quote" ? marketConfig.quoteSymbol : baseSymbol;
     if (!shielded) return { symbol, text: "—" };
-    const raw = shielded[token.toLowerCase()] ?? 0n;
+    const raw = shielded[BigInt(token).toString()] ?? 0n;
     return {
       symbol,
       text: `${(Number(raw) / 10 ** decimals).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${symbol}`,

@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { ChevronDown, EyeOff } from "lucide-react";
 import { MARKETS, fmtPrice } from "./data";
+import styles from "@/app/terminal.module.css";
 
 type Props = {
   market: string;
   onMarket: (s: string) => void;
   mark: number;
   oracle: number;
+  priceSource: string;
+  oracleVerified: boolean;
 };
 
 function Stat({
@@ -22,12 +25,11 @@ function Stat({
   tone?: "long" | "short" | "muted";
   icon?: React.ReactNode;
 }) {
-  const color =
-    tone === "long" ? "text-[#00e5ff]" : tone === "short" ? "text-[#9d4edd]" : "text-white/85";
+  const color = tone === "long" ? styles.statCyan : tone === "short" ? styles.statPurple : tone === "muted" ? styles.statMuted : "";
   return (
-    <div className="flex flex-col gap-0.5 whitespace-nowrap">
-      <span className="text-[10px] uppercase tracking-[0.08em] text-white/35">{label}</span>
-      <span className={`tnum flex items-center gap-1 text-[13px] font-semibold ${color}`}>
+    <div className={styles.stat}>
+      <span className={styles.statLabel}>{label}</span>
+      <span className={`${styles.tnum} ${styles.statValue} ${color}`}>
         {icon}
         {value}
       </span>
@@ -35,25 +37,25 @@ function Stat({
   );
 }
 
-export function MarketBar({ market, onMarket, mark, oracle }: Props) {
+export function MarketBar({ market, onMarket, mark, oracle, priceSource, oracleVerified }: Props) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="flex h-14 shrink-0 items-center gap-7 border-b border-white/10 bg-[#121319] px-4">
+    <div className={styles.marketBar}>
       {/* Market selector */}
-      <div className="relative">
+      <div className={styles.marketSelect}>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-2 rounded-md border border-white/10 bg-[#18191e] px-3 py-2 transition-colors hover:bg-white/[0.06]"
+          className={styles.marketButton}
         >
-          <span className="text-[14px] font-bold tracking-tight text-white">{market}</span>
-          <span className="rounded bg-[#00e5ff]/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-[#00e5ff]">
+          <span className={styles.marketSymbol}>{market}</span>
+          <span className={styles.privateFlag}>
             PRIVATE
           </span>
-          <ChevronDown className="size-3.5 text-white/40" />
+          <ChevronDown size={14} className={styles.headerIcon} />
         </button>
         {open && (
-          <div className="absolute left-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-md border border-white/10 bg-[#18191e] shadow-2xl">
+          <div className={styles.marketMenu}>
             {MARKETS.map((m) => (
               <button
                 key={m.symbol}
@@ -61,35 +63,29 @@ export function MarketBar({ market, onMarket, mark, oracle }: Props) {
                   onMarket(m.symbol);
                   setOpen(false);
                 }}
-                className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-[13px] transition-colors hover:bg-white/[0.06] ${
-                  m.symbol === market ? "text-white" : "text-white/60"
-                }`}
+                className={`${styles.marketOption} ${m.symbol === market ? styles.marketOptionSelected : ""}`}
               >
-                <span className="font-semibold">{m.symbol}</span>
-                <span className="tnum text-[11px] text-white/35">{m.maxLev}x</span>
+                <span className={styles.marketSymbol}>{m.symbol}</span>
+                <span className={styles.tnum}>{m.maxLev}x</span>
               </button>
             ))}
           </div>
         )}
       </div>
 
-      <div className="h-7 w-px bg-white/10" />
+      <div className={styles.marketDivider} />
 
-      <Stat label="Mark Price" value={fmtPrice(mark)} tone="long" />
-      <Stat label="Oracle Price" value={fmtPrice(oracle)} />
-      <Stat label="24h Change" value="+2.34%" tone="long" />
-      <Stat label="1h Funding" value="0.0041%" tone="short" />
-      <Stat
-        label="Shielded Liquidity"
-        value="hidden"
-        tone="muted"
-        icon={<EyeOff className="size-3 text-white/35" />}
-      />
+      <div className={styles.statStrip}>
+        <Stat label="Mark Price" value={fmtPrice(mark)} tone="long" />
+        <Stat label={oracleVerified ? "Oracle Price" : "Reference Price"} value={fmtPrice(oracle)} />
+        <Stat label="24h Change" value="—" tone="muted" />
+        <Stat label="Funding" value="N/A" tone="muted" />
+        <Stat label="Shielded liquidity" value="private" tone="muted" icon={<EyeOff size={12} />} />
+      </div>
 
-      <div className="flex-1" />
-      <div className="hidden items-center gap-2 text-[11px] text-white/30 xl:flex">
-        <span className="size-1.5 rounded-full bg-[#00e5ff]" />
-        Pragma oracle · live
+      <div className={styles.oracle}>
+        <span className={styles.networkDot} />
+        {priceSource}
       </div>
     </div>
   );

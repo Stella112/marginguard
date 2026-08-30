@@ -45,7 +45,7 @@ export type SpotMarket = {
 export const SPOT_MARKETS: SpotMarket[] = [
   {
     id: "strk",
-    symbol: "STRK",
+    symbol: "STRK/USDC",
     name: "Starknet Token",
     baseToken: MARK_BASE,
     baseDecimals: 18,
@@ -56,7 +56,7 @@ export const SPOT_MARKETS: SpotMarket[] = [
   },
   {
     id: "eth",
-    symbol: "ETH",
+    symbol: "ETH/USDC",
     name: "Ether",
     baseToken: "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7",
     baseDecimals: 18,
@@ -67,7 +67,7 @@ export const SPOT_MARKETS: SpotMarket[] = [
   },
   {
     id: "btc",
-    symbol: "BTC",
+    symbol: "BTC/USDC",
     name: "Wrapped Bitcoin",
     baseToken: "0x03fe2b97c1fd336e750087d68b9b867997fd64a2661ff3ca5a7c771641e8e7ac",
     baseDecimals: 8,
@@ -78,7 +78,7 @@ export const SPOT_MARKETS: SpotMarket[] = [
   },
   {
     id: "sol",
-    symbol: "SOL",
+    symbol: "SOL/USDC",
     name: "Solana",
     baseToken: "0x0",
     baseDecimals: 9,
@@ -313,10 +313,41 @@ export async function readAgentViewingKey(agent: string): Promise<string> {
 
 /** Live STRK/USDC mark price from the deployed PragmaOracle, in human USDC per STRK. */
 export async function readMarkPrice(): Promise<number> {
-  const r = await call(MG.oracle, "get_price", [MARK_BASE, MARK_QUOTE]);
+  return readMarkPriceFor(MARK_BASE);
+}
+
+/** Live quote price for a supported Mainnet spot asset. */
+export async function readMarkPriceFor(baseToken: string): Promise<number> {
+  const r = await call(MG.oracle, "get_price", [baseToken, MARK_QUOTE]);
   // Oracle returns quote-smallest per base-smallest × 1e18. STRK 18dp, USDC 6dp:
   // human = value / 1e18 × 10^(18-6) = value / 1e6.
   return Number(BigInt(r[0])) / 1e6;
+}
+
+/** Read the deployed oracle using its engine price scale (1e18). */
+export async function readEnginePrice(base: string, quote: string): Promise<bigint> {
+  const [value] = await call(MG.oracle, "get_price", [base, quote]);
+  return BigInt(value);
+}
+
+/** Read a user's reserved-free balance held by the stateful spot venue. */
+export async function readVenueBalance(trader: string, token: string): Promise<bigint> {
+  const [value] = await call(MG.venue, "balance_of", [trader, token]);
+  return BigInt(value);
+}
+
+/** Read the public lifecycle flags for an order created by this browser. */
+export async function readOrderState(orderId: string): Promise<{ live: boolean; matched: boolean; claimed: boolean }> {
+  const [live, matched, claimed] = await Promise.all([
+    call(MG.orderBook, "is_live", [orderId]),
+    call(MG.orderBook, "is_matched", [orderId]),
+    call(MG.venue, "is_claimed", [orderId]),
+  ]);
+  return {
+    live: BigInt(live[0]) === 1n,
+    matched: BigInt(matched[0]) === 1n,
+    claimed: BigInt(claimed[0]) === 1n,
+  };
 }
 
 export type PositionView = {

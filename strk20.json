@@ -40,6 +40,14 @@
       "note": "Current mainnet system uses the Pragma STRK/USD median oracle. The perp engine is an accounting prototype; collateral custody is not yet atomic with position opening."
     }
   },
+  "transactions": [],
+  "contracts": [
+    "0x05b99dcb0d9995a112c1e12ea1695247a43811f586513027bb6d1057bc673e55",
+    "0x038d443ba8d1bc4dc914ff2aadf9acbd3c0785c376b66986c7e7520090f5c1af",
+    "0x00aaa439cf40d1d535e7d58245443461fbff2ce7ed272b441cc09683a741354c",
+    "0x03cc0b36be4110edad405125c38b139907d6da371ab7661161265f29408b514c",
+    "0x01add9644c5c302745548a67fa65b173f71ecbe9a1ab1c3fcd12dd34515042f0"
+  ],
   "demo_video": "",
-  "demo_url": ""
+  "demo_url": "https://getmarginguard.xyz"
 }

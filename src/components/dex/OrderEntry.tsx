@@ -1,289 +1,217 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import { Lock, Loader2, Check, ShieldCheck } from "lucide-react";
-import { fmtUsd, fmtPrice } from "./data";
+import { ExternalLink, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
+import type { STRK20_ACTION } from "@starknet-io/types-js";
+import { num } from "starknet";
+import { fmtPrice } from "./data";
+import styles from "@/app/terminal.module.css";
+import { useStoreWallet } from "@/app/components/Wallet/walletContext";
+import {
+  MG,
+  SPOT_MARKETS,
+  SIDE_BUY,
+  SIDE_SELL,
+  orderCommitment,
+  randomFelt,
+  readProvider,
+  traderCommitment,
+} from "@/utils/marginguard";
 
-type Side = "long" | "short";
+type Side = "buy" | "sell";
 type OrderType = "Market" | "Limit" | "Stop";
-type Phase = "idle" | "proving" | "done";
 
-const TIERS = [2, 5, 10] as const;
-const FREE_COLLATERAL = 18420.55;
+const STRK_DECIMALS = 18;
+const USDC_DECIMALS = 6;
+const ZERO = "0x0";
+const EXPLORER = "https://voyager.online/tx/";
 
-const PROOF_STEPS = [
-  "Building shielded note inputs",
-  "Generating STARK proof (Stwo)",
-  "Submitting to STRK20 pool",
-];
+function parseUnits(value: string, decimals: number): bigint {
+  const clean = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(clean)) throw new Error("Enter a positive decimal amount.");
+  const [whole, fraction = ""] = clean.split(".");
+  if (fraction.length > decimals) throw new Error(`Use at most ${decimals} decimal places.`);
+  return BigInt(whole) * 10n ** BigInt(decimals) +
+    BigInt((fraction + "0".repeat(decimals)).slice(0, decimals) || "0");
+}
 
-export function OrderEntry({ mark }: { mark: number }) {
-  const [side, setSide] = useState<Side>("long");
+function quoteAmount(size: bigint, price: bigint): bigint {
+  // Venue PRICE_SCALE is 1e18: base smallest units × quote-smallest per
+  // whole base unit / 1e18 = quote smallest units.
+  return (size * price) / 10n ** 18n;
+}
+
+function shortHash(hash: string): string {
+  return hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
+}
+
+function rememberOrder(record: Record<string, string>) {
+  try {
+    const current = JSON.parse(sessionStorage.getItem("marginguard.spot-orders") ?? "[]");
+    // Keep the owner secret in the current browser session only. It is required
+    // for a later claim/cancel and must not survive as a durable localStorage secret.
+    sessionStorage.setItem("marginguard.spot-orders", JSON.stringify([record, ...current].slice(0, 20)));
+    localStorage.removeItem("marginguard.spot-orders");
+  } catch {
+    // Local persistence is convenience only; the chain remains authoritative.
+  }
+}
+
+export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "strk" | "eth" | "btc" | "sol" }) {
+  const marketConfig = SPOT_MARKETS.find((item) => item.id === market) ?? SPOT_MARKETS[0];
+  const account = useStoreWallet((state) => state.myWalletAccount);
+  const connected = useStoreWallet((state) => state.isConnected);
+  const walletApi = useStoreWallet((state) => state.walletApiList);
+  const [side, setSide] = useState<Side>("buy");
   const [type, setType] = useState<OrderType>("Limit");
-  const [size, setSize] = useState("50000");
+  const [size, setSize] = useState("");
   const [price, setPrice] = useState("");
-  const [lev, setLev] = useState<(typeof TIERS)[number]>(5);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [step, setStep] = useState(0);
+  const [message, setMessage] = useState("");
+  const [txHash, setTxHash] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (mark && !price) setPrice(mark.toFixed(5));
+    if (mark && !price) setPrice(mark.toFixed(6));
   }, [mark, price]);
-
-  // Mocked ZK-proof generation, then confirm.
-  useEffect(() => {
-    if (phase !== "proving") return;
-    if (step < PROOF_STEPS.length - 1) {
-      const t = setTimeout(() => setStep((s) => s + 1), 850);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setPhase("done"), 900);
-    return () => clearTimeout(t);
-  }, [phase, step]);
-
-  useEffect(() => {
-    if (phase !== "done") return;
-    const t = setTimeout(() => {
-      setPhase("idle");
-      setStep(0);
-    }, 2200);
-    return () => clearTimeout(t);
-  }, [phase]);
 
   const sizeN = Number(size) || 0;
   const priceN = Number(price) || mark;
   const notional = sizeN * priceN;
-  const margin = lev ? notional / lev : 0;
-  const accent = side === "long" ? "#00e5ff" : "#9d4edd";
+  const reserveLabel = side === "buy" ? "USDC" : "STRK";
+  const accent = side === "buy" ? styles.submitLong : styles.submitShort;
 
-  return (
-    <div className="flex min-h-0 flex-col overflow-y-auto bg-[#121319]">
-      {/* Long / Short */}
-      <div className="grid shrink-0 grid-cols-2">
-        {(["long", "short"] as Side[]).map((sd) => {
-          const on = side === sd;
-          const c = sd === "long" ? "#00e5ff" : "#9d4edd";
-          return (
-            <button
-              key={sd}
-              onClick={() => setSide(sd)}
-              className="relative h-11 text-[13px] font-bold uppercase tracking-wide transition-colors"
-              style={{ color: on ? c : "rgba(255,255,255,0.35)", background: on ? `${c}14` : "transparent" }}
-            >
-              {sd}
-              {on && <span className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: c }} />}
-            </button>
-          );
-        })}
-      </div>
+  async function waitFor(tx: string) {
+    const receipt: any = await readProvider().waitForTransaction(tx, { retries: 120, retryInterval: 3000 });
+    if (receipt?.execution_status === "REVERTED" || receipt?.status === "REVERTED") {
+      throw new Error("The transaction reverted on Starknet.");
+    }
+  }
 
-      <div className="flex flex-col gap-3 border-t border-white/10 p-3">
-        {/* Order type */}
-        <div className="flex items-center gap-1 rounded-md bg-[#18191e] p-0.5">
-          {(["Market", "Limit", "Stop"] as OrderType[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setType(t)}
-              className={`flex-1 rounded px-2 py-1.5 text-[11.5px] font-semibold transition-colors ${
-                type === t ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+  async function submitOrder() {
+    setMessage("");
+    setTxHash("");
+    if (!account || !connected) {
+      setMessage("Connect a Starknet wallet first.");
+      return;
+    }
+    const supportsStrk20 = walletApi.some((version) => {
+      const [major, minor, patch] = version.split(".").map(Number);
+      return major > 0 || (major === 0 && (minor > 10 || (minor === 10 && patch >= 3)));
+    });
+    if (!supportsStrk20) {
+      setMessage("This wallet does not advertise STRK20 Wallet API 0.10.3 or newer. Reconnect with Ready or Xverse to fund a private order.");
+      return;
+    }
+    if (type !== "Limit") {
+      setMessage("Only limit orders are live on the deployed private venue. Market and stop execution are not wired yet.");
+      return;
+    }
 
-        {/* Size */}
-        <div>
-          <div className="mb-1 flex items-center justify-between text-[10.5px] uppercase tracking-[0.06em] text-white/35">
-            <span>Size</span>
-            <span className="tnum">≈ {fmtUsd(notional)}</span>
-          </div>
-          <div className="flex items-center gap-1 rounded-md border border-white/10 bg-[#18191e] px-2.5 focus-within:border-white/25">
-            <input
-              value={size}
-              onChange={(e) => setSize(e.target.value)}
-              className="tnum h-9 w-full bg-transparent text-[13.5px] text-white outline-none"
-            />
-            <span className="text-[11px] text-white/35">STRK</span>
-            <button
-              onClick={() => setSize(String(Math.floor((FREE_COLLATERAL * lev) / (priceN || 1))))}
-              className="rounded bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-bold text-white/60 transition-colors hover:bg-white/15 hover:text-white"
-            >
-              MAX
-            </button>
-          </div>
-        </div>
+    try {
+      setBusy(true);
+      if (!marketConfig.available) throw new Error(marketConfig.note ?? "This market is not available yet.");
+      const sizeUnits = parseUnits(size, marketConfig.baseDecimals);
+      const quoteUnits = parseUnits(price, marketConfig.quoteDecimals);
+      const priceUnits = (quoteUnits * 10n ** 18n) / (10n ** BigInt(marketConfig.baseDecimals));
+      if (sizeUnits <= 0n || priceUnits <= 0n) throw new Error("Enter a size and limit price greater than zero.");
 
-        {/* Price */}
-        <div>
-          <div className="mb-1 flex items-center justify-between text-[10.5px] uppercase tracking-[0.06em] text-white/35">
-            <span>{type === "Stop" ? "Trigger price" : "Price"}</span>
-            {type === "Market" && <span className="text-white/25">market</span>}
-          </div>
-          <div className="flex items-center gap-1 rounded-md border border-white/10 bg-[#18191e] px-2.5 focus-within:border-white/25">
-            <input
-              value={type === "Market" ? "" : price}
-              placeholder={type === "Market" ? fmtPrice(mark) : ""}
-              disabled={type === "Market"}
-              onChange={(e) => setPrice(e.target.value)}
-              className="tnum h-9 w-full bg-transparent text-[13.5px] text-white outline-none placeholder:text-white/25 disabled:cursor-not-allowed"
-            />
-            <span className="text-[11px] text-white/35">USDC</span>
-          </div>
-        </div>
+      const reserveAmount = side === "buy" ? quoteAmount(sizeUnits, priceUnits) : sizeUnits;
+      if (reserveAmount <= 0n) throw new Error("The reserve is below the token precision.");
 
-        {/* Leverage tiers — locked to exactly 2x / 5x / 10x */}
-        <div>
-          <div className="mb-1.5 flex items-center justify-between text-[10.5px] uppercase tracking-[0.06em] text-white/35">
-            <span>Leverage Tier</span>
-            <span className="tnum font-bold" style={{ color: accent }}>{lev}x</span>
-          </div>
-          <div className="relative px-1">
-            <div className="absolute inset-x-1 top-1/2 h-0.5 -translate-y-1/2 rounded bg-white/10" />
-            <div
-              className="absolute left-1 top-1/2 h-0.5 -translate-y-1/2 rounded transition-all"
-              style={{
-                background: accent,
-                width: `${(TIERS.indexOf(lev) / (TIERS.length - 1)) * 100}%`,
-              }}
-            />
-            <div className="relative flex justify-between">
-              {TIERS.map((t) => {
-                const on = lev === t;
-                const passed = TIERS.indexOf(t) <= TIERS.indexOf(lev);
-                return (
-                  <button key={t} onClick={() => setLev(t)} className="flex flex-col items-center gap-1.5 py-1">
-                    <span
-                      className="size-3 rounded-full border-2 transition-all"
-                      style={{
-                        borderColor: passed ? accent : "rgba(255,255,255,0.2)",
-                        background: on ? accent : "#121319",
-                      }}
-                    />
-                    <span
-                      className="tnum text-[10.5px] font-semibold"
-                      style={{ color: on ? accent : "rgba(255,255,255,0.35)" }}
-                    >
-                      {t}x
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+      // These values never leave the browser in plaintext. The venue receives
+      // only the trader and order commitments during placement. The owner
+      // secret is needed later to cancel or claim this order.
+      const ownerSecret = randomFelt();
+      const salt = randomFelt();
+      const orderId = randomFelt();
+      const trader = traderCommitment(ownerSecret);
+      const orderCommit = orderCommitment(side === "buy" ? SIDE_BUY : SIDE_SELL, priceUnits, sizeUnits, salt);
+      const reserveToken = side === "buy" ? marketConfig.quoteToken : marketConfig.baseToken;
 
-        {/* Shielded collateral */}
-        <div className="rounded-md border border-white/10 bg-[#18191e] p-2.5">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1.5 text-[11px] text-white/45">
-              <Lock className="size-3 text-[#9d4edd]" />
-              Shielded Free Collateral
-            </span>
-            <span className="tnum text-[12.5px] font-bold text-white">{fmtUsd(FREE_COLLATERAL)}</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between border-t border-white/[0.07] pt-2 text-[11px]">
-            <span className="text-white/35">Initial margin</span>
-            <span className="tnum text-white/70">{fmtUsd(margin)}</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between text-[11px]">
-            <span className="text-white/35">Est. liq. price</span>
-            <span className="tnum text-white/70">
-              {fmtPrice(side === "long" ? priceN * (1 - 0.5 / lev) : priceN * (1 + 0.5 / lev))}
-            </span>
-          </div>
-        </div>
+      setMessage("Step 1/2 · Confirm STRK20 collateral funding in your wallet…");
+      // The pool must actually move the reserve to the venue before the invoke runs:
+      // `do_fund` measures the venue's real ERC-20 balance and reverts UNDERFUNDED if the
+      // tokens are not already there. An invoke-only STRK20 transaction moves nothing (and
+      // the wallet rejects it as a malformed payload), so the withdraw leg is required.
+      // Phase order is enforced by the protocol: Withdraw (6) precedes InvokeExternal (7).
+      const fundActions: STRK20_ACTION[] = [
+        {
+          type: "withdraw",
+          token: reserveToken,
+          amount: num.toHex(reserveAmount),
+          recipient: MG.venue,
+        },
+        {
+          type: "invoke",
+          contract: MG.venue,
+          // VenueOperation::Fund plus the remaining positional fields. Fund returns an
+          // empty span, so no OPEN note is needed for this leg.
+          calldata: ["0x0", trader, reserveToken, num.toHex(reserveAmount), ZERO, ZERO, "0x0", ZERO, ZERO, ZERO, ZERO],
+        },
+      ];
+      const funded = await account.strk20InvokeTransaction(fundActions);
+      setTxHash(funded.transaction_hash);
+      await waitFor(funded.transaction_hash);
 
-        {/* Submit */}
-        <button
-          disabled={phase !== "idle"}
-          onClick={() => {
-            setStep(0);
-            setPhase("proving");
-          }}
-          className="relative h-12 w-full overflow-hidden rounded-md text-[13.5px] font-bold uppercase tracking-wide text-[#06121a] transition-opacity disabled:cursor-wait"
-          style={{ background: accent }}
-        >
-          <AnimatePresence mode="wait">
-            {phase === "idle" && (
-              <motion.span
-                key="idle"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center justify-center gap-2"
-              >
-                <ShieldCheck className="size-4" />
-                Place Shielded Order
-              </motion.span>
-            )}
-            {phase === "proving" && (
-              <motion.span
-                key="proving"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center justify-center gap-2"
-              >
-                <Loader2 className="size-4 animate-spin" />
-                Generating proof…
-              </motion.span>
-            )}
-            {phase === "done" && (
-              <motion.span
-                key="done"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center justify-center gap-2"
-              >
-                <Check className="size-4" />
-                Order Shielded
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </button>
+      setMessage("Step 2/2 · Funding confirmed. Confirm the shielded limit order…");
+      const placed = await account.execute([{
+        contractAddress: MG.venue,
+        entrypoint: "place_order",
+        calldata: [
+          orderId,
+          trader,
+          orderCommit,
+          marketConfig.baseToken,
+          marketConfig.quoteToken,
+          reserveToken,
+          reserveAmount.toString(),
+        ],
+      }]);
+      setTxHash(placed.transaction_hash);
+      await waitFor(placed.transaction_hash);
 
-        {/* Proof progress */}
-        <AnimatePresence>
-          {phase !== "idle" && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden rounded-md border border-white/10 bg-[#18191e]"
-            >
-              <div className="flex flex-col gap-1.5 p-2.5">
-                {PROOF_STEPS.map((s, i) => {
-                  const active = phase === "proving" && i === step;
-                  const complete = phase === "done" || i < step;
-                  return (
-                    <div key={s} className="flex items-center gap-2 text-[11px]">
-                      {complete ? (
-                        <Check className="size-3 text-[#00e5ff]" />
-                      ) : active ? (
-                        <Loader2 className="size-3 animate-spin text-white/60" />
-                      ) : (
-                        <span className="size-3 rounded-full border border-white/15" />
-                      )}
-                      <span className={complete || active ? "text-white/75" : "text-white/30"}>{s}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      rememberOrder({
+        orderId,
+        ownerSecret,
+        salt,
+        baseToken: marketConfig.baseToken,
+        quoteToken: marketConfig.quoteToken,
+        priceUnits: priceUnits.toString(),
+        sizeUnits: sizeUnits.toString(),
+        side,
+        size,
+        price,
+        fundingTx: funded.transaction_hash,
+        placementTx: placed.transaction_hash,
+      });
+      window.dispatchEvent(new Event("marginguard:orders"));
+      setMessage(`Order live. It is backed by ${reserveAmount.toString()} ${reserveLabel} units and waiting for a counterparty.`);
+    } catch (error: any) {
+      const raw = error?.message ?? error?.toString?.() ?? "The order was not submitted.";
+      setMessage(raw.includes("INVALID_REQUEST_PAYLOAD")
+        ? "The connected wallet rejected the STRK20 request format. Use a wallet with STRK20 Wallet API support, such as Ready or Xverse, then reconnect."
+        : raw);
+    } finally {
+      setBusy(false);
+    }
+  }
 
-        <p className="text-[10px] leading-relaxed text-white/25">
-          Size and price never reach public state — only a Poseidon commitment does. Settlement
-          lands in a shielded STRK20 note.
-        </p>
-      </div>
+  return <section className={styles.entry}>
+    <div className={styles.sideTabs}>
+      <button className={`${styles.sideTab} ${side === "buy" ? styles.sideTabLong : ""}`} onClick={() => setSide("buy")}>Buy</button>
+      <button className={`${styles.sideTab} ${side === "sell" ? styles.sideTabShort : ""}`} onClick={() => setSide("sell")}>Sell</button>
     </div>
-  );
+    <div className={styles.entryBody}>
+      <div className={styles.entryLabel}>Spot dark pool <span>{marketConfig.symbol}</span></div>
+      <div className={styles.segmented}>{(["Market", "Limit", "Stop"] as OrderType[]).map((item) => <button key={item} onClick={() => setType(item)} className={`${styles.segment} ${type === item ? styles.segmentActive : ""}`}>{item}</button>)}</div>
+      <label><span className={styles.fieldLabel}><span>Order size</span><span className={styles.fieldValue}>≈ ${notional.toFixed(2)}</span></span><span className={styles.inputWrap}><input value={size} onChange={(event) => setSize(event.target.value)} placeholder="0.00" className={`${styles.input} ${styles.tnum}`} inputMode="decimal" /><span className={styles.inputUnit}>{marketConfig.symbol.split("/")[0]}</span></span></label>
+      <label><span className={styles.fieldLabel}><span>Limit price</span><span className={styles.fieldValue}>{marketConfig.quoteSymbol}</span></span><span className={styles.inputWrap}><input value={price} placeholder={fmtPrice(mark)} disabled={type === "Market"} onChange={(event) => setPrice(event.target.value)} className={`${styles.input} ${styles.tnum}`} inputMode="decimal" /><span className={styles.inputUnit}>{marketConfig.quoteSymbol}</span></span></label>
+      <div className={styles.collateral}><div className={styles.collateralRow}><span><LockKeyhole size={11} style={{ verticalAlign: "-2px", marginRight: 5 }} />Shielded balance</span><span className={styles.collateralValue}>Wallet consent required</span></div><div className={styles.collateralRow}><span>Reserve required</span><span className={styles.collateralValue}>{reserveLabel}</span></div><div className={styles.collateralRow}><span>Verified oracle mark</span><span className={`${styles.collateralValue} ${styles.collateralMain}`}>{mark ? fmtPrice(mark) : "—"}</span></div></div>
+      <button onClick={submitOrder} disabled={busy} className={`${styles.submit} ${accent}`}><ShieldCheck size={14} />{busy ? "Processing…" : "Place shielded order"}</button>
+      {message && <div className={`${styles.proof} ${message.includes("Order live") ? styles.positive : styles.negative}`}><div className={styles.proofStep}><KeyRound size={12} />{message}</div>{txHash && <a href={`${EXPLORER}${txHash}`} target="_blank" rel="noreferrer" className={styles.txLink}>{shortHash(txHash)} <ExternalLink size={11} /></a>}</div>}
+      <p className={styles.entryFoot}><KeyRound size={11} style={{ verticalAlign: "-2px", marginRight: 5 }} />Funding and placement are separate by design. Your price and size are committed privately; the chain sees only lifecycle flags until matching.</p>
+    </div>
+  </section>;
 }
 
 export default OrderEntry;

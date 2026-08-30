@@ -20,6 +20,15 @@ const spaceMono = Space_Mono({
 export const metadata: Metadata = {
   title: 'MarginGuard · Private Dark Pool & Perps on STRK20',
   description: 'A private spot dark pool and perpetuals venue on Starknet, built on STRK20 shielded notes, with agent-verified risk management.',
+  metadataBase: new URL('https://getmarginguard.xyz'),
+  alternates: { canonical: '/' },
+  openGraph: {
+    title: 'MarginGuard · Private markets on Starknet',
+    description: 'A professional private trading terminal for shielded spot and perp markets.',
+    url: 'https://getmarginguard.xyz',
+    siteName: 'MarginGuard',
+    type: 'website',
+  },
 }
 
 export default function RootLayout({

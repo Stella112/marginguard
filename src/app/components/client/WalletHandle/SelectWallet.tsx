@@ -19,7 +19,7 @@ function normalizeId(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" | "ctaBig" }) {
+export default function SelectWallet({ variant = "ctaBig", className = "" }: { variant?: "nav" | "ctaBig"; className?: string }) {
 
   const setMyWallet = useStoreWallet(state => state.setMyStarknetWalletObject);
 
@@ -37,6 +37,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   const setAddressAccount = useStoreWallet(state => state.setAddressAccount);
 
   const [connecting, setConnecting] = useState(false);
+  const [connectingWallet, setConnectingWallet] = useState("");
   const [error, setError] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState(false);
   // Detected Starknet wallets, in render state so the picker updates as wallets register.
@@ -61,31 +62,56 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
 
   // Unchanged connection flow: takes the wallet-standard wallet and populates
   // the zustand store with a WalletAccountV6 + account/chain/permissions.
+  async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 15000): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label + " timed out. Check that the wallet extension is unlocked.")), timeoutMs);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function handleSelectedWallet(selectedWallet: WalletWithStarknetFeatures) {
     setMyWallet(selectedWallet); // zustand
     console.log("Trying to connect wallet=", selectedWallet);
-    const myWA = await WalletAccountV6.connect(myFrontendProviders[2], selectedWallet);
-    setMyWalletAccount(myWA);
-    console.log("WalletAccount created=", myWA);
-    const result = await walletV6.requestAccounts(selectedWallet);
+    // MarginGuard is a Mainnet deployment. The previous UI always connected the
+    // account against the Sepolia provider, which made later Mainnet calls fail
+    // even when the wallet itself was on Mainnet.
+    // Request accounts exactly once. WalletAccountV6.connect() performs its
+    // own standard-connect handshake; calling requestAccounts after it caused
+    // the wallet bridge to hang in some extensions. Silent connect reuses the
+    // permission just granted by this request.
+    const result = await withTimeout(walletV6.requestAccounts(selectedWallet), "Wallet account request");
     if (typeof (result) == "string") {
-      console.log("This Wallet is not compatible.");
-      return;
+      throw new Error("This wallet did not return a Starknet account.");
     }
     console.log("Current account addr =", result);
     if (Array.isArray(result)) {
       const addr = validateAndParseAddress(result[0]);
       setAddressAccount(addr); // zustand
     }
-    const isConnectedWallet: boolean = await walletV6.getPermissions(selectedWallet).then((res: any) => (res as WALLET_API.Permission[]).includes(WALLET_API.Permission.ACCOUNTS));
+    const isConnectedWallet: boolean = await withTimeout(
+      walletV6.getPermissions(selectedWallet).then((res: any) => (res as WALLET_API.Permission[]).includes(WALLET_API.Permission.ACCOUNTS)),
+      "Wallet permission check",
+    );
+    if (!isConnectedWallet || !Array.isArray(result) || !result[0]) {
+      throw new Error("Wallet did not grant account access.");
+    }
+    const myWA = await withTimeout(WalletAccountV6.connectSilent(myFrontendProviders[0], selectedWallet), "Wallet account setup");
+    setMyWalletAccount(myWA);
+    console.log("WalletAccount created=", myWA);
     setConnected(isConnectedWallet); // zustand
     if (isConnectedWallet) {
-      const chainId = (await walletV6.requestChainId(selectedWallet)) as string;
+      const chainId = (await withTimeout(walletV6.requestChainId(selectedWallet), "Wallet network request")) as string;
       setChain(chainId);
       setCurrentFrontendProviderIndex(chainId === SNconstants.StarknetChainId.SN_MAIN ? 0 : 2);
       console.log("change Provider index to :", myFrontendProviderIndex);
     }
-    setWalletApi(await walletV6.supportedSpecs(selectedWallet));
+    const supportedWalletApi = await withTimeout(walletV6.supportedWalletApi(selectedWallet), "Wallet capability check");
+    setWalletApi(supportedWalletApi);
   }
 
   // Open the wallet picker so the user can choose (Ready, Xverse, ...).
@@ -104,6 +130,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
   async function selectWallet(w: WalletWithStarknetFeatures) {
     setError("");
     setConnecting(true);
+    setConnectingWallet(w.name);
     try {
       await handleSelectedWallet(w);
       setPickerOpen(false);
@@ -112,6 +139,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
       setError(err?.message ?? "Wallet connection failed.");
     } finally {
       setConnecting(false);
+      setConnectingWallet("");
     }
   }
 
@@ -144,7 +172,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className={styles.walletIcon} src={w.icon} alt="" />
                 <span className={styles.walletName}>{w.name}</span>
-                <span className={styles.walletGo}>{connecting ? "Connecting" : "Open"}</span>
+                <span className={styles.walletGo}>{connectingWallet === w.name ? "Connecting" : "Open"}</span>
               </button>
             ))}
           </div>
@@ -166,7 +194,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
     if (isConnected && address) {
       return (
         <button
-          className={styles.addrPill}
+          className={`${styles.addrPill} ${className}`}
           onClick={() => setConnected(false)}
           title="Disconnect"
         >
@@ -178,7 +206,7 @@ export default function SelectWallet({ variant = "ctaBig" }: { variant?: "nav" |
     }
     return (
       <>
-        <button className={styles.connectPill} onClick={openPicker}>
+        <button className={`${styles.connectPill} ${className}`} onClick={openPicker}>
           Connect
         </button>
         {picker}

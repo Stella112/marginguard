@@ -1,112 +1,75 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CandlestickChart, Maximize2 } from "lucide-react";
-import { buildCandles, fmtPrice } from "./data";
+import { fmtPrice } from "./data";
+import styles from "@/app/terminal.module.css";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1D"] as const;
 
-/** Mock TradingView-style candlestick panel with a timeframe toolbar. */
 export function TradeChart({ market, mark }: { market: string; mark: number }) {
   const [tf, setTf] = useState<(typeof TIMEFRAMES)[number]>("1h");
-  const candles = useMemo(() => buildCandles(mark || 1, 90), [mark]);
-
+  const [prices, setPrices] = useState<number[]>([]);
+  const asset = market.split(/[\/-]/)[0];
+  useEffect(() => {
+    let active = true;
+    setPrices([]);
+    fetch(`/api/market?asset=${asset}`).then((response) => response.ok ? response.json() : Promise.reject()).then((data: { prices?: [number, number][] }) => { if (active) setPrices((data.prices ?? []).map(([, value]) => value)); }).catch(() => { if (active) setPrices([]); });
+    return () => { active = false; };
+  }, [asset]);
+  const candles = useMemo(() => {
+    const values = prices.length ? prices : mark > 0 ? [mark] : [];
+    return values.slice(-72).map((close, index, list) => {
+      const previous = list[index - 1] ?? close;
+      const high = Math.max(previous, close);
+      const low = Math.min(previous, close);
+      return { o: previous, c: close, h: high, l: low, t: index };
+    });
+  }, [prices, mark]);
   const W = 1000;
   const H = 340;
   const padY = 16;
-  const lo = Math.min(...candles.map((c) => c.l));
-  const hi = Math.max(...candles.map((c) => c.h));
+  const lo = candles.length ? Math.min(...candles.map((c) => c.l)) : 0;
+  const hi = candles.length ? Math.max(...candles.map((c) => c.h)) : 1;
   const y = (p: number) => padY + (1 - (p - lo) / (hi - lo || 1)) * (H - padY * 2);
-  const cw = W / candles.length;
-
-  // Right-hand price ladder
-  const ticks = Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) / 4) * i).reverse();
+  const cw = W / Math.max(candles.length, 1);
+  const ticks = Array.from({ length: 6 }, (_, i) => lo + ((hi - lo) / 5) * i).reverse();
 
   return (
-    <div className="flex min-h-0 flex-col border-b border-white/10 bg-[#121319]">
-      {/* Toolbar */}
-      <div className="flex h-9 shrink-0 items-center gap-3 border-b border-white/10 px-3">
-        <CandlestickChart className="size-3.5 text-white/35" />
-        <span className="text-[12px] font-semibold text-white/70">{market}</span>
-        <div className="flex items-center gap-0.5">
-          {TIMEFRAMES.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTf(t)}
-              className={`tnum rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-                tf === t ? "bg-white/10 text-white" : "text-white/40 hover:text-white/75"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+    <section className={`${styles.chart} ${styles.borderBottom}`}>
+      <div className={styles.chartToolbar}>
+        <CandlestickChart size={14} className={styles.headerIcon} />
+        <span className={styles.chartName}>{market}</span>
+        {TIMEFRAMES.map((t) => (
+          <button key={t} onClick={() => setTf(t)} className={`${styles.timeframe} ${tf === t ? styles.timeframeActive : ""}`}>
+            {t}
+          </button>
+        ))}
+        <div className={styles.ohlc}>
+          <span>O {fmtPrice(candles[0]?.o ?? 0)}</span>
+          <span>H {fmtPrice(hi)}</span>
+          <span>L {fmtPrice(lo)}</span>
+          <span className={styles.ohlcClose}>C {fmtPrice(mark)}</span>
         </div>
-        <div className="flex-1" />
-        <span className="tnum text-[11px] text-white/30">O {fmtPrice(candles[0]?.o ?? 0)}</span>
-        <span className="tnum text-[11px] text-white/30">H {fmtPrice(hi)}</span>
-        <span className="tnum text-[11px] text-white/30">L {fmtPrice(lo)}</span>
-        <span className="tnum text-[11px] text-[#00e5ff]">C {fmtPrice(mark)}</span>
-        <Maximize2 className="size-3.5 text-white/25" />
+        <Maximize2 size={14} className={styles.headerIcon} />
       </div>
-
-      {/* Chart body */}
-      <div className="relative min-h-0 flex-1">
-        <svg
-          className="size-full"
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          shapeRendering="crispEdges"
-        >
-          {ticks.map((t, i) => (
-            <line
-              key={i}
-              x1={0}
-              x2={W}
-              y1={y(t)}
-              y2={y(t)}
-              stroke="rgba(255,255,255,0.06)"
-              strokeWidth={1}
-            />
-          ))}
+      <div className={styles.chartBody}>
+        {candles.length ? <svg className={styles.chartSvg} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" shapeRendering="crispEdges" aria-label={`${market} live market chart`}>
+          {ticks.map((t, i) => <line key={i} x1={0} x2={W} y1={y(t)} y2={y(t)} stroke="rgba(255,255,255,.055)" />)}
           {candles.map((d, i) => {
             const x = i * cw + cw / 2;
             const up = d.c >= d.o;
-            const col = up ? "#00e5ff" : "#9d4edd";
+            const color = up ? "#00e5ff" : "#9d4edd";
             const top = Math.min(y(d.o), y(d.c));
-            const h = Math.max(1.5, Math.abs(y(d.o) - y(d.c)));
-            return (
-              <g key={i}>
-                <line x1={x} x2={x} y1={y(d.h)} y2={y(d.l)} stroke={col} strokeWidth={1} opacity={0.75} />
-                <rect x={x - cw * 0.3} width={cw * 0.6} y={top} height={h} fill={col} />
-              </g>
-            );
+            const height = Math.max(1.5, Math.abs(y(d.o) - y(d.c)));
+            return <g key={i}><line x1={x} x2={x} y1={y(d.h)} y2={y(d.l)} stroke={color} opacity=".8" /><rect x={x - cw * .28} width={cw * .56} y={top} height={height} fill={color} /></g>;
           })}
-          {/* Mark line */}
-          <line
-            x1={0}
-            x2={W}
-            y1={y(mark)}
-            y2={y(mark)}
-            stroke="#00e5ff"
-            strokeWidth={1}
-            strokeDasharray="4 4"
-            opacity={0.6}
-          />
-        </svg>
-
-        {/* Price ladder */}
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex w-16 flex-col justify-between border-l border-white/10 bg-[#121319]/85 py-3 pl-2">
-          {ticks.map((t, i) => (
-            <span key={i} className="tnum text-[10px] text-white/35">
-              {fmtPrice(t)}
-            </span>
-          ))}
-        </div>
-        <div className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-white/25">
-          No public trade tape — resting orders are shielded commitments.
-        </div>
+          <line x1={0} x2={W} y1={y(mark)} y2={y(mark)} stroke="#00e5ff" strokeDasharray="4 4" opacity=".7" />
+        </svg> : <div className={styles.chartCaption}>Live market history unavailable. Oracle mark remains the only verified price source.</div>}
+        <div className={styles.priceLadder}>{ticks.map((t, i) => <span key={i} className={styles.tnum}>{fmtPrice(t)}</span>)}</div>
+        {candles.length ? <div className={styles.chartCaption}>Public market history · {tf} · chart feed</div> : null}
       </div>
-    </div>
+    </section>
   );
 }
 

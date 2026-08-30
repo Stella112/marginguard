@@ -135,7 +135,7 @@ Stated here and in [SECURITY_ASSUMPTIONS.md](docs/SECURITY_ASSUMPTIONS.md):
 ```
 contracts/   Cairo contracts + tests (scarb build, scarb cairo-test — 115 tests)
 scripts/     signature vectors, pool discovery, deploy (starkli + starknet.js)
-src/         Next.js frontend, wired to the Sepolia deployment
+src/         Next.js frontend, wired to the current Mainnet deployment
 docs/        ARCHITECTURE_REPORT · ARCHITECTURE · DEPLOYMENT · SECURITY_ASSUMPTIONS · ADDRESSES
 ```
 

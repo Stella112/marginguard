@@ -249,13 +249,17 @@ export function PerpOrderEntry() {
         })}
       </div>
 
-      <input
-        value={size}
-        onChange={(event) => setSize(event.target.value)}
-        placeholder="Size in STRK"
-        className={styles.input}
-        style={{ width: "100%", marginBottom: 10 }}
-      />
+      {/* .input is borderless by design; .inputWrap supplies the field chrome. */}
+      <span className={styles.inputWrap} style={{ marginBottom: 10 }}>
+        <input
+          value={size}
+          onChange={(event) => setSize(event.target.value)}
+          placeholder="0.00"
+          className={`${styles.input} ${styles.tnum}`}
+          inputMode="decimal"
+        />
+        <span className={styles.inputUnit}>STRK</span>
+      </span>
 
       <div className={styles.collateralRow}><span>Oracle mark</span><span className={`${styles.collateralValue} ${styles.collateralMain}`}>{markText}</span></div>
       <div className={styles.collateralRow}><span>Notional</span><span className={styles.collateralValue}>{notionalRaw ? `$${formatUnits(notionalRaw, USDC_DECIMALS)}` : "-"}</span></div>

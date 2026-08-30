@@ -510,13 +510,17 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
               })}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <input
-                value={depositAmount}
-                onChange={(e) => setDepositAmount(e.target.value)}
-                placeholder={`Amount in ${depositSymbol}`}
-                className={styles.input}
-                style={{ flex: 1 }}
-              />
+              {/* .input is borderless by design; .inputWrap supplies the field chrome. */}
+              <span className={styles.inputWrap} style={{ flex: 1 }}>
+                <input
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                  placeholder="0.00"
+                  className={`${styles.input} ${styles.tnum}`}
+                  inputMode="decimal"
+                />
+                <span className={styles.inputUnit}>{depositSymbol}</span>
+              </span>
               <button
                 type="button"
                 onClick={shieldTokens}
@@ -544,13 +548,16 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
                 still in the pool. Withdraw it back to your public balance here.
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                <input
-                  value={recoverAmount}
-                  onChange={(e) => setRecoverAmount(e.target.value)}
-                  placeholder="Amount in STRK"
-                  className={styles.input}
-                  style={{ flex: 1 }}
-                />
+                <span className={styles.inputWrap} style={{ flex: 1 }}>
+                  <input
+                    value={recoverAmount}
+                    onChange={(e) => setRecoverAmount(e.target.value)}
+                    placeholder="0.00"
+                    className={`${styles.input} ${styles.tnum}`}
+                    inputMode="decimal"
+                  />
+                  <span className={styles.inputUnit}>STRK</span>
+                </span>
                 <button
                   type="button"
                   onClick={() => unshieldTokens(MARK_BASE, 18, "STRK", recoverAmount)}

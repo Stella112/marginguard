@@ -14,6 +14,7 @@ import {
   SIDE_SELL,
   orderCommitment,
   randomFelt,
+  readPoolRegistration,
   readProvider,
   traderCommitment,
 } from "@/utils/marginguard";
@@ -102,6 +103,9 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   // Which token to shield. Defaults to whatever the current side reserves, but the user can
   // shield either leg independently — funding and order side are separate concerns.
   const [depositAsset, setDepositAsset] = useState<"base" | "quote">("quote");
+  // null = not checked yet. Read straight from the pool so the UI can state registration
+  // status up front rather than surfacing NOT_REGISTERED mid-transaction.
+  const [registered, setRegistered] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (mark && !price) setPrice(mark.toFixed(6));
@@ -130,6 +134,14 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   useEffect(() => {
     refreshBalances();
   }, [refreshBalances]);
+
+  useEffect(() => {
+    if (!account?.address) {
+      setRegistered(null);
+      return;
+    }
+    readPoolRegistration(account.address).then(setRegistered).catch(() => setRegistered(null));
+  }, [account?.address]);
 
   /** Shields public tokens into the STRK20 pool so they can back a private order. */
   async function shieldTokens() {
@@ -303,6 +315,26 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       <label><span className={styles.fieldLabel}><span>Order size</span><span className={styles.fieldValue}>≈ ${notional.toFixed(2)}</span></span><span className={styles.inputWrap}><input value={size} onChange={(event) => setSize(event.target.value)} placeholder="0.00" className={`${styles.input} ${styles.tnum}`} inputMode="decimal" /><span className={styles.inputUnit}>{marketConfig.symbol.split("/")[0]}</span></span></label>
       <label><span className={styles.fieldLabel}><span>Limit price</span><span className={styles.fieldValue}>{marketConfig.quoteSymbol}</span></span><span className={styles.inputWrap}><input value={price} placeholder={fmtPrice(mark)} disabled={type === "Market"} onChange={(event) => setPrice(event.target.value)} className={`${styles.input} ${styles.tnum}`} inputMode="decimal" /><span className={styles.inputUnit}>{marketConfig.quoteSymbol}</span></span></label>
       <div className={styles.collateral}>
+        {connected && registered === false && (
+          <div style={{
+            padding: "8px 10px", marginBottom: 8, borderRadius: 6, fontSize: 10.5, lineHeight: 1.5,
+            border: "1px solid rgba(157,78,221,0.45)", background: "rgba(157,78,221,0.12)",
+            color: "#d8bcff",
+          }}>
+            <strong style={{ display: "block", marginBottom: 2 }}>Pool registration required</strong>
+            This address has no viewing key in the STRK20 pool. Only a wallet can register one —
+            open Ready and use its privacy / shield feature once, then reload here.
+          </div>
+        )}
+        {connected && registered === true && (
+          <div style={{
+            padding: "6px 10px", marginBottom: 8, borderRadius: 6, fontSize: 10.5,
+            border: "1px solid rgba(0,229,255,0.35)", background: "rgba(0,229,255,0.10)",
+            color: "#8ef0ff",
+          }}>
+            Registered with the STRK20 pool · private actions enabled
+          </div>
+        )}
         <div className={styles.collateralRow}>
           <span><LockKeyhole size={11} style={{ verticalAlign: "-2px", marginRight: 5 }} />Shielded balance</span>
           <span className={styles.collateralValue}>

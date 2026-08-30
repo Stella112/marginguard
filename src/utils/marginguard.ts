@@ -373,3 +373,20 @@ export async function readPosition(positionId: string): Promise<PositionView> {
     commitment,
   };
 }
+
+/**
+ * Whether an address has registered a viewing key with the STRK20 pool.
+ *
+ * Registration (SetViewingKey) is a prerequisite for every private action, and it cannot be
+ * triggered by a dapp: the Wallet API exposes only deposit/withdraw/transfer/invoke, so the
+ * wallet must register the user itself on first use. Reading the pool's `get_public_key`
+ * lets the UI say so up front instead of surfacing a NOT_REGISTERED failure mid-transaction.
+ */
+export async function readPoolRegistration(address: string): Promise<boolean> {
+  try {
+    const [key] = await call(MG.pool, "get_public_key", [address]);
+    return BigInt(key) !== 0n;
+  } catch {
+    return false;
+  }
+}

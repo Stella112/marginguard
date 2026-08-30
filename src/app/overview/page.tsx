@@ -44,6 +44,8 @@ export default function OverviewPage() {
   const connected = useStoreWallet((state) => state.isConnected);
   const [balances, setBalances] = useState<Balance[] | null>(null);
   const [balanceError, setBalanceError] = useState("");
+  // Bumped by the retry control so a declined consent prompt can be re-requested.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!connected || !account) { setBalances(null); return; }
@@ -65,9 +67,20 @@ export default function OverviewPage() {
         return { asset: meta.asset, amount: formatUnits(rawAmount, meta.decimals), raw: rawAmount };
       });
       if (active) setBalances(next);
-    }).catch((error: unknown) => { if (active) { setBalances([]); setBalanceError(error instanceof Error ? error.message : String(error)); } });
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setBalances([]);
+      const raw = error instanceof Error ? error.message : String(error);
+      // USER_REFUSED_OP means the wallet's "share private balances" consent was declined —
+      // the app is not broken and there is nothing to retry until consent is granted.
+      setBalanceError(raw.includes("USER_REFUSED_OP")
+        ? "Balance sharing was declined in the wallet. Your shielded funds are unaffected — approve the “Share balances” prompt to display them here."
+        : raw.includes("NOT_REGISTERED")
+          ? "This wallet is not registered with the STRK20 pool yet."
+          : raw);
+    });
     return () => { active = false; };
-  }, [account, connected]);
+  }, [account, connected, reloadKey]);
 
   const allocation = useMemo(() => {
     const total = (balances ?? []).reduce((sum, balance) => sum + balance.raw, 0n);
@@ -83,7 +96,7 @@ export default function OverviewPage() {
     <div className={styles.overviewHeader}><div><div className={styles.eyebrow}>Account / private risk surface</div><h1 className={styles.overviewTitle}>Portfolio overview</h1><p className={styles.overviewDescription}>Read-only balances from your privacy-enabled wallet. Position economics remain private commitments.</p></div><div className={styles.overviewAddress}>{address}</div></div>
     <div className={styles.metricGrid}><Metric label="Net shielded value" value="—" sub={connected ? "Value feed not configured" : "Connect wallet to load"} icon={<LockKeyhole size={15} />} /><Metric label="Free collateral" value="—" sub="Not exposed by public chain state" icon={<WalletCards size={15} />} /><Metric label="Initial margin requirement" value="—" sub="Loaded from position view, not indexed" icon={<AlertTriangle size={15} />} /></div>
 
-    <div className={styles.overviewGrid}><section className={styles.allocation}><div className={styles.sectionTitle}>Shielded allocation</div><div className={styles.sectionSub}>Derived from the wallet’s private balance response.</div><div className={styles.donut}>{allocation.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={allocation} dataKey="value" innerRadius={68} outerRadius={96} paddingAngle={2} stroke="none">{allocation.map((item) => <Cell key={item.name} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer> : <div className={styles.privateEmpty}><LockKeyhole size={16} /><strong>{connected ? "No shielded balances" : "Wallet not connected"}</strong><span>{balanceError || "Connect a privacy-enabled Starknet wallet to read notes."}</span></div>}<div className={styles.donutCenter}><span className={styles.donutLabel}>Assets</span><span className={styles.donutValue}>{balances?.length ?? "—"}</span></div></div><div className={styles.legend}>{allocation.map((item) => <div key={item.name} className={styles.legendRow}><span className={styles.legendSwatch} style={{ background: item.color }} /><span>{item.name}</span><strong>loaded</strong></div>)}</div></section>
+    <div className={styles.overviewGrid}><section className={styles.allocation}><div className={styles.sectionTitle}>Shielded allocation</div><div className={styles.sectionSub}>Derived from the wallet’s private balance response.</div><div className={styles.donut}>{allocation.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={allocation} dataKey="value" innerRadius={68} outerRadius={96} paddingAngle={2} stroke="none">{allocation.map((item) => <Cell key={item.name} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer> : <div className={styles.privateEmpty}><LockKeyhole size={16} /><strong>{connected ? "No shielded balances" : "Wallet not connected"}</strong><span>{balanceError || "Connect a privacy-enabled Starknet wallet to read notes."}</span>{connected && balanceError ? <button onClick={() => setReloadKey((k) => k + 1)} style={{ marginTop: 10, padding: "6px 14px", fontSize: 11, fontWeight: 700, borderRadius: 6, cursor: "pointer", border: "1px solid rgba(0,229,255,0.45)", background: "rgba(0,229,255,0.12)", color: "#00e5ff" }}>Request balances again</button> : null}</div>}<div className={styles.donutCenter}><span className={styles.donutLabel}>Assets</span><span className={styles.donutValue}>{balances?.length ?? "—"}</span></div></div><div className={styles.legend}>{allocation.map((item) => <div key={item.name} className={styles.legendRow}><span className={styles.legendSwatch} style={{ background: item.color }} /><span>{item.name}</span><strong>loaded</strong></div>)}</div></section>
 
       <div className={styles.overviewTables}><section className={styles.tablePanel}><div className={styles.tablePanelHeader}><span className={styles.sectionTitle}>Shielded spot balances</span><span className={styles.panelBadge}>WALLET READ</span></div><table className={styles.table}><thead><tr><th>Asset</th><th>Balance</th><th>Value</th><th>Source</th></tr></thead><tbody>{balances?.length ? balances.map((balance) => <tr key={balance.asset}><td className={styles.tableStrong}>{balance.asset}</td><td className={styles.tnum}>{balance.amount}</td><td className={styles.tnum}>—</td><td className={styles.tableMuted}>STRK20 wallet</td></tr>) : <tr><td colSpan={4} className={styles.emptyCell}>{connected ? "No shielded notes returned by the wallet." : "Connect wallet to read shielded balances."}</td></tr>}</tbody></table></section>
       <section className={styles.tablePanel}><div className={styles.tablePanelHeader}><span className={styles.sectionTitle}>Private perp positions</span><span className={styles.panelBadge}>COMMITMENTS ONLY</span></div><table className={styles.table}><thead><tr><th>Market</th><th>Side</th><th>Size</th><th>Entry</th><th>Status</th></tr></thead><tbody><tr><td colSpan={5} className={styles.emptyCell}>Positions are not publicly enumerable. Look up a known position commitment to inspect its lifecycle.</td></tr></tbody></table></section></div></div>

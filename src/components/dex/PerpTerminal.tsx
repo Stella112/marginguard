@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, EyeOff, Search, ShieldCheck } from "lucide-react";
 import { MG, readMarkPriceFor, readPosition, type PositionView } from "@/utils/marginguard";
+import PerpOrderEntry from "./PerpOrderEntry";
 import { fmtPrice } from "./data";
 import styles from "@/app/terminal.module.css";
 
@@ -76,12 +77,7 @@ export function PerpTerminal() {
           {!position && !lookupError && <div className={styles.emptyPerp}>No position loaded. Position values are not enumerable from public state.</div>}
         </section>
 
-        <section className={`${styles.perpCard} ${styles.perpDisabled}`}>
-          <div className={styles.panelHeader}><span>Order entry</span><span className={styles.panelBadge}>COLLATERAL RAIL PENDING</span></div>
-          <h2>Perp order route is paused</h2>
-          <p>The deployed PerpEngine records commitments and risk settlement, but its collateral custody is not atomically connected to STRK20 yet. This view therefore reads the real contract without fabricating an executable order.</p>
-          <button className={styles.disabledOrderButton} disabled>Place perp order</button>
-        </section>
+        <PerpOrderEntry />
       </div>
     </div>
   );

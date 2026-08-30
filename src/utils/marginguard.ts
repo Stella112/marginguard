@@ -44,6 +44,17 @@ export type SpotMarket = {
 /** Mainnet spot markets. BTC is represented by canonical StarkGate WBTC. */
 export const SPOT_MARKETS: SpotMarket[] = [
   {
+    id: "strk",
+    symbol: "STRK/USDC",
+    name: "Starknet Token",
+    baseToken: MARK_BASE,
+    baseDecimals: 18,
+    quoteToken: MARK_QUOTE,
+    quoteSymbol: "USDC",
+    quoteDecimals: 6,
+    available: true,
+  },
+  {
     id: "eth",
     symbol: "ETH/USDC",
     name: "Ether",
@@ -64,19 +75,6 @@ export const SPOT_MARKETS: SpotMarket[] = [
     quoteSymbol: "USDC",
     quoteDecimals: 6,
     available: true,
-  },
-  {
-    id: "strk",
-    symbol: "STRK/USDC",
-    name: "Starknet Token",
-    baseToken: MARK_BASE,
-    baseDecimals: 18,
-    quoteToken: MARK_QUOTE,
-    quoteSymbol: "USDC",
-    quoteDecimals: 6,
-    available: false,
-    note: "Ready does not report shielded STRK balances, so STRK cannot be traded here. "
-      + "Shielded STRK already in the pool is safe; use Unshield to bring it back out.",
   },
   {
     id: "sol",

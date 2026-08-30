@@ -53,3 +53,18 @@ export function formatUnits(raw: bigint, decimals: number, places = 2) {
 export const PRICE_SCALE = 10n ** 18n;
 export const STRK_DECIMALS = 18;
 export const USDC_DECIMALS = 6;
+
+/**
+ * Formats a quote-token amount as USD, widening precision below a dollar.
+ *
+ * A 1 STRK position is worth about $0.026, so its margin and PnL both round away
+ * entirely at two decimals and read as $0.00 - which looks like the figure is not
+ * being computed at all. Sub-dollar amounts therefore get five places, mirroring the
+ * adaptive precision the price formatter already uses.
+ */
+export function formatUsd(raw: bigint, decimals = USDC_DECIMALS) {
+  const negative = raw < 0n;
+  const abs = negative ? -raw : raw;
+  const places = abs < 10n ** BigInt(decimals) ? 5 : 2;
+  return `${negative ? "-" : ""}$${formatUnits(abs, decimals, places)}`;
+}

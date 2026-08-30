@@ -19,6 +19,7 @@ import {
   STRK_DECIMALS,
   USDC_DECIMALS,
   formatUnits,
+  formatUsd,
   parseUnits,
   readPackets,
   writePackets,
@@ -148,7 +149,7 @@ export function PerpOrderEntry({ enginePrice }: { enginePrice: bigint | null }) 
         <label>
           <span className={styles.fieldLabel}>
             <span>Order size</span>
-            <span className={styles.fieldValue}>{notionalRaw ? `= $${formatUnits(notionalRaw, USDC_DECIMALS)}` : "= $0.00"}</span>
+            <span className={styles.fieldValue}>{notionalRaw ? `= ${formatUsd(notionalRaw)}` : "= $0.00"}</span>
           </span>
           <span className={styles.inputWrap}>
             <input
@@ -184,11 +185,11 @@ export function PerpOrderEntry({ enginePrice }: { enginePrice: bigint | null }) 
         </div>
         <div className={styles.collateralRow}>
           <span>Order value</span>
-          <span className={styles.collateralValue}>{notionalRaw ? `$${formatUnits(notionalRaw, USDC_DECIMALS)}` : "-"}</span>
+          <span className={styles.collateralValue}>{notionalRaw ? formatUsd(notionalRaw) : "-"}</span>
         </div>
         <div className={styles.collateralRow}>
           <span>Margin required</span>
-          <span className={styles.collateralValue}>{marginRaw ? `$${formatUnits(marginRaw, USDC_DECIMALS)}` : "-"}</span>
+          <span className={styles.collateralValue}>{marginRaw ? formatUsd(marginRaw) : "-"}</span>
         </div>
         <div className={styles.collateralRow}>
           <span>Liquidation price</span>

@@ -9,6 +9,7 @@ import {
   STRK_DECIMALS,
   USDC_DECIMALS,
   formatUnits,
+  formatUsd,
   readPackets,
   writePackets,
   type PerpPacket,
@@ -141,9 +142,9 @@ export function PerpDataPanel({ mark }: { mark: bigint | null }) {
                     <td className={styles.tnum}>{formatUnits(BigInt(packet.size), STRK_DECIMALS)}</td>
                     <td className={styles.tnum}>{packet.leverage}x</td>
                     <td className={styles.tnum}>${formatUnits(BigInt(packet.entryPrice), USDC_DECIMALS, 5)}</td>
-                    <td className={styles.tnum}>${formatUnits(BigInt(packet.margin), USDC_DECIMALS)}</td>
+                    <td className={styles.tnum}>{formatUsd(BigInt(packet.margin))}</td>
                     <td className={`${styles.tnum} ${pnl === null ? styles.tableMuted : up ? styles.positive : styles.negative}`}>
-                      {pnl === null ? "-" : `${up ? "+" : "-"}$${formatUnits(pnl < 0n ? -pnl : pnl, USDC_DECIMALS)}`}
+                      {pnl === null ? "-" : `${up ? "+" : ""}${formatUsd(pnl)}`}
                     </td>
                     <td>
                       <span className={styles.actionGroup}>

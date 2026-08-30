@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
 import type { STRK20_ACTION } from "@starknet-io/types-js";
 import { num } from "starknet";
@@ -114,8 +114,13 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
   const refreshBalances = useCallback(async () => {
     if (!account) return;
     try {
-      // Empty array asks the wallet for every private balance it knows about.
-      const entries: any[] = await account.strk20Balances([]);
+      // Ask only for this market's two tokens. Passing [] would request *every* private
+      // balance the wallet holds — a far broader disclosure than this venue needs, and the
+      // reason Ready raised a "share all private balances" consent prompt.
+      const entries: any[] = await account.strk20Balances([
+        marketConfig.baseToken,
+        marketConfig.quoteToken,
+      ]);
       const next: Record<string, bigint> = {};
       for (const entry of entries ?? []) {
         const token = entry?.token ?? entry?.token_address;
@@ -129,11 +134,19 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       // The wallet refused (no STRK20 support, or consent declined).
       setShielded(null);
     }
-  }, [account]);
+  }, [account, marketConfig.baseToken, marketConfig.quoteToken]);
 
+  // Reading balances triggers a wallet consent prompt, so ask at most once per connected
+  // account+market. Everything after that is user-initiated (the refresh control, or a
+  // successful deposit) — otherwise every re-render re-prompts.
+  const askedRef = useRef<string>("");
   useEffect(() => {
+    if (!account?.address) return;
+    const key = `${account.address}:${marketConfig.symbol}`;
+    if (askedRef.current === key) return;
+    askedRef.current = key;
     refreshBalances();
-  }, [refreshBalances]);
+  }, [account?.address, marketConfig.symbol, refreshBalances]);
 
   useEffect(() => {
     if (!account?.address) {

@@ -43,7 +43,13 @@ export default function OverviewPage() {
     if (!connected || !account) { setBalances(null); return; }
     let active = true;
     setBalanceError("");
-    account.strk20Balances([]).then((raw: unknown) => {
+    // Scope the request to the tokens this venue actually trades. Passing [] asks the wallet
+    // to disclose *every* private balance it holds, which is what triggered Ready's
+    // "share all private balances" consent prompt.
+    const tokens = Array.from(new Set(
+      SPOT_MARKETS.flatMap((m) => [m.baseToken, m.quoteToken]).filter((t) => t && t !== "0x0"),
+    ));
+    account.strk20Balances(tokens).then((raw: unknown) => {
       const rows = (raw as { value?: unknown })?.value ?? raw;
       if (!Array.isArray(rows)) throw new Error("Unexpected shielded balance response");
       const next = rows.map((row: any) => {

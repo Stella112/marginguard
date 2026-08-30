@@ -6,6 +6,7 @@ import { num } from "starknet";
 import { MG, readPosition, readProvider, type PositionView } from "@/utils/marginguard";
 import {
   PERP_EVENT,
+  PRICE_SCALE,
   STRK_DECIMALS,
   USDC_DECIMALS,
   formatUnits,
@@ -19,6 +20,9 @@ import styles from "@/app/terminal.module.css";
 
 type Tab = "positions" | "lookup";
 const SIDE_LONG = 0;
+// Mirrors PerpEngine: MAINTENANCE_BPS = 5000 against BPS_DENOMINATOR = 10000.
+const MAINTENANCE_BPS = 5000n;
+const BPS_DENOMINATOR = 10000n;
 
 export function PerpDataPanel({ mark }: { mark: bigint | null }) {
   const account = useStoreWallet((state) => state.myWalletAccount);
@@ -90,14 +94,33 @@ export function PerpDataPanel({ mark }: { mark: bigint | null }) {
     }
   }
 
-  /** Unrealised PnL against the live mark, using the engine's own quote_value scaling. */
-  function pnlOf(packet: PerpPacket) {
+  /**
+   * Unrealised PnL and liquidation risk, mirroring PerpEngine's own arithmetic.
+   *
+   * The engine exposes no view for this - `equity_of` and `loss_of` are internal - so it
+   * has to be recomputed here from the committed values and the live oracle mark, using
+   * the same `quote_value(size, price) = size * price / PRICE_SCALE` scaling.
+   *
+   * Two details matter for the figure to be honest rather than merely arithmetic:
+   *   - the engine floors equity at zero, so a loss can never exceed posted margin. A raw
+   *     delta would overstate the downside on a position already past its margin.
+   *   - liquidation triggers when equity falls below MAINTENANCE_BPS (50%) of margin,
+   *     which happens well before the loss reaches the full margin.
+   */
+  function riskOf(packet: PerpPacket) {
     if (!mark) return null;
     const size = BigInt(packet.size);
     const entry = BigInt(packet.entryPrice);
-    const entryValue = (size * entry) / 10n ** 18n;
-    const nowValue = (size * mark) / 10n ** 18n;
-    return packet.side === SIDE_LONG ? nowValue - entryValue : entryValue - nowValue;
+    const margin = BigInt(packet.margin);
+    const entryValue = (size * entry) / PRICE_SCALE;
+    const nowValue = (size * mark) / PRICE_SCALE;
+    const delta = packet.side === SIDE_LONG ? nowValue - entryValue : entryValue - nowValue;
+    const loss = delta < 0n ? -delta : 0n;
+    const equity = loss >= margin ? 0n : margin + delta;
+    // Settlement pays equity, so the realisable PnL is bounded below by -margin.
+    const pnl = equity - margin;
+    const liquidatable = loss > 0n && equity < (margin * MAINTENANCE_BPS) / BPS_DENOMINATOR;
+    return { pnl, equity, liquidatable };
   }
 
   const tabs = [
@@ -132,12 +155,18 @@ export function PerpDataPanel({ mark }: { mark: bigint | null }) {
             </thead>
             <tbody>
               {packets.map((packet) => {
-                const pnl = pnlOf(packet);
+                const risk = riskOf(packet);
+                const pnl = risk?.pnl ?? null;
                 const up = pnl !== null && pnl >= 0n;
                 return (
                   <tr key={packet.positionId}>
                     <td className={packet.side === SIDE_LONG ? styles.sideLong : styles.sideShort}>
                       {packet.side === SIDE_LONG ? "LONG" : "SHORT"}
+                      {risk?.liquidatable && (
+                        <span title="Equity is below the 50% maintenance threshold; this position can be liquidated by anyone."
+                          style={{ marginLeft: 5, padding: "1px 4px", borderRadius: 3, fontSize: 9,
+                            background: "rgba(244,91,105,0.18)", color: "#f45b69" }}>LIQ</span>
+                      )}
                     </td>
                     <td className={styles.tnum}>{formatUnits(BigInt(packet.size), STRK_DECIMALS)}</td>
                     <td className={styles.tnum}>{packet.leverage}x</td>

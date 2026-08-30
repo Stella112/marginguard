@@ -61,6 +61,7 @@
 .chartBody { position: relative; min-height: 0; flex: 1; } .chartSvg { display: block; width: 100%; height: 100%; }
 .priceLadder { position: absolute; inset: 0 0 0 auto; display: flex; flex-direction: column; justify-content: space-between; width: 74px; padding: 11px 9px; border-left: 1px solid var(--line); background: rgba(16,17,21,.86); color: var(--dim); font-size: 10px; pointer-events: none; }
 .chartCaption { position: absolute; bottom: 9px; left: 13px; color: var(--dim); font-size: 10px; pointer-events: none; }
+.timeAxis { position: absolute; right: 74px; bottom: 24px; left: 0; display: flex; justify-content: space-between; padding: 0 10px; color: var(--dim); font-size: 9.5px; pointer-events: none; }
 .dataPanel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); } .tabs { display: flex; align-items: center; gap: 3px; min-height: 39px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .tab { height: 27px; padding: 0 10px; border: 0; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; } .tab:hover { color: var(--text); } .tabActive { background: rgba(255,255,255,.08); color: var(--text); }
 .count { margin-left: 5px; color: var(--dim); font: 10px var(--font-mono-ui), monospace; } .unlock { display: inline-flex; align-items: center; gap: 6px; height: 25px; margin-left: auto; padding: 0 9px; border: 1px solid rgba(157,78,221,.45); background: rgba(157,78,221,.09); color: #c58cff; font-size: 10px; font-weight: 700; cursor: pointer; }

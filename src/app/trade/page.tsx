@@ -36,9 +36,8 @@ export default function TradePage() {
     setPriceSource("Public reference feed");
     fetch(`/api/market?asset=${selected.symbol.split("/")[0]}`)
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((data: { prices?: [number, number][] }) => {
-        const latest = data.prices?.at(-1)?.[1];
-        if (latest) setMark(latest);
+      .then((data: { current?: number | null }) => {
+        if (data.current) setMark(data.current);
       })
       .catch(() => {});
   }, [selected.baseToken]);

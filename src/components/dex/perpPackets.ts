@@ -68,3 +68,35 @@ export function formatUsd(raw: bigint, decimals = USDC_DECIMALS) {
   const places = abs < 10n ** BigInt(decimals) ? 5 : 2;
   return `${negative ? "-" : ""}$${formatUnits(abs, decimals, places)}`;
 }
+
+/** Mirrors PerpEngine: MAINTENANCE_BPS = 5000 against BPS_DENOMINATOR = 10000. */
+export const MAINTENANCE_BPS = 5000n;
+export const BPS_DENOMINATOR = 10000n;
+const SIDE_LONG = 0;
+
+/**
+ * Unrealised PnL, equity and liquidation risk for an open position.
+ *
+ * PerpEngine exposes no view for any of this - `equity_of` and `loss_of` are internal
+ * free functions - so it is recomputed from the committed values and the live oracle
+ * mark, using the engine's own `quote_value(size, price) = size * price / PRICE_SCALE`.
+ *
+ * Kept here rather than in the panel so the parity check in `scripts/` can exercise the
+ * same code the UI renders, against the contract's own test vectors.
+ */
+export function riskOf(packet: Pick<PerpPacket, "side" | "size" | "entryPrice" | "margin">, mark: bigint) {
+  const size = BigInt(packet.size);
+  const entry = BigInt(packet.entryPrice);
+  const margin = BigInt(packet.margin);
+  const entryValue = (size * entry) / PRICE_SCALE;
+  const nowValue = (size * mark) / PRICE_SCALE;
+  const delta = packet.side === SIDE_LONG ? nowValue - entryValue : entryValue - nowValue;
+  const loss = delta < 0n ? -delta : 0n;
+  // The engine floors equity at zero, so a loss can never exceed posted margin.
+  const equity = loss >= margin ? 0n : margin + delta;
+  return {
+    pnl: equity - margin,
+    equity,
+    liquidatable: loss > 0n && equity < (margin * MAINTENANCE_BPS) / BPS_DENOMINATOR,
+  };
+}

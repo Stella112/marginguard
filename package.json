@@ -6,7 +6,8 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "check:perp": "node --experimental-strip-types --no-warnings scripts/check_perp_parity.mjs"
   },
   "dependencies": {
     "@starknet-io/get-starknet-discovery": "6.0.2",

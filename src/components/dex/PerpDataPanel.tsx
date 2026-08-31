@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, EyeOff, GitMerge, LockKeyhole, Search } from "lucide-react";
 import { num } from "starknet";
-import { MG, readPosition, readProvider, type PositionView } from "@/utils/marginguard";
+import { MG, readPosition, readProvider, scanPositions, type PositionView } from "@/utils/marginguard";
+import { derivePosition, unlockSeed } from "@/utils/keyvault";
 import {
   PERP_EVENT,
   riskOf as sharedRiskOf,
@@ -52,19 +53,23 @@ export function PerpDataPanel({ mark }: { mark: bigint | null }) {
     if (!account || !connected) { setNotice("Connect a wallet to close this position."); return; }
     try {
       setBusy(packet.positionId);
+      // Re-derive the secret from the wallet rather than reading a stored one.
+      setNotice("Sign to derive your trading keys, then confirm the close.");
+      const seed = await unlockSeed(account);
+      const { ownerSecret, salt } = derivePosition(seed, packet.index);
       setNotice("Confirm the close. The committed economics are revealed to the contract only now, so it can verify and settle.");
       const result = await account.execute([{
         contractAddress: MG.perpEngine,
         entrypoint: "close_position",
         calldata: [
           packet.positionId,
-          packet.ownerSecret,
+          ownerSecret,
           num.toHex(packet.side),
           num.toHex(BigInt(packet.size)),
           num.toHex(BigInt(packet.entryPrice)),
           num.toHex(BigInt(packet.margin)),
           num.toHex(packet.leverage),
-          packet.salt,
+          salt,
         ],
       }]);
       await waitFor(result.transaction_hash);
@@ -91,6 +96,68 @@ export function PerpDataPanel({ mark }: { mark: bigint | null }) {
     }
   }
 
+
+  /**
+   * Backup and restore for the local economics cache.
+   *
+   * Secrets are derived from the wallet now, so this file holds nothing spendable - but the
+   * committed economics still cannot be recomputed, and `close_position` needs them. A file
+   * the user keeps is the difference between a recoverable browser and a stranded position.
+   */
+  function exportBackup() {
+    const blob = new Blob([JSON.stringify(readPackets(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `marginguard-positions-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setNotice("Backup saved. Keep it: without these figures a position cannot be closed.");
+  }
+
+  function importBackup(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (!Array.isArray(parsed)) throw new Error("That file is not a MarginGuard backup.");
+        const byId = new Map<string, PerpPacket>();
+        for (const item of [...readPackets(), ...parsed as PerpPacket[]]) byId.set(item.positionId, item);
+        writePackets([...byId.values()]);
+        setNotice(`Restored ${parsed.length} position${parsed.length === 1 ? "" : "s"} from backup.`);
+      } catch (error: any) {
+        setNotice(error?.message ?? "That file could not be read.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  /** Rebuilds the list of on-chain positions from the wallet alone, with no local state. */
+  async function checkChain() {
+    if (!account || !connected) { setNotice("Connect a wallet to check the chain."); return; }
+    try {
+      setBusy("scan");
+      setNotice("Sign to derive your trading keys, then the chain is scanned for your positions.");
+      const seed = await unlockSeed(account);
+      const found = await scanPositions(seed);
+      const open = found.filter((item) => item.open);
+      const known = new Set(readPackets().map((item) => item.positionId));
+      const missing = open.filter((item) => !known.has(item.positionId));
+      setNotice(
+        found.length === 0
+          ? "No positions found on-chain for this wallet."
+          : `${found.length} position${found.length === 1 ? "" : "s"} on-chain, ${open.length} still open` +
+            (missing.length
+              ? `. ${missing.length} not in this browser - restore a backup to close ${missing.length === 1 ? "it" : "them"}.`
+              : ". All are listed here."),
+      );
+    } catch (error: any) {
+      setNotice(error?.message ?? String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
   const riskOf = (packet: PerpPacket) => (mark ? sharedRiskOf(packet, mark) : null);
 
   const tabs = [
@@ -114,6 +181,25 @@ export function PerpDataPanel({ mark }: { mark: bigint | null }) {
       </div>
 
       {notice && <div className={styles.lifecycleNotice}><GitMerge size={13} />{notice}</div>}
+
+      <div style={{ display: "flex", gap: 6, padding: "6px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+        {[
+          { label: "Check chain", onClick: checkChain },
+          { label: "Back up", onClick: exportBackup },
+        ].map((action) => (
+          <button key={action.label} type="button" onClick={action.onClick} disabled={busy === "scan"}
+            style={{ padding: "4px 9px", fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: "pointer",
+              border: "1px solid rgba(255,255,255,0.16)", background: "transparent", color: "rgba(255,255,255,0.7)" }}>
+            {busy === "scan" && action.label === "Check chain" ? "Scanning" : action.label}
+          </button>
+        ))}
+        <label style={{ padding: "4px 9px", fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: "pointer",
+          border: "1px solid rgba(255,255,255,0.16)", color: "rgba(255,255,255,0.7)" }}>
+          Restore
+          <input type="file" accept="application/json" style={{ display: "none" }}
+            onChange={(event) => { const f = event.target.files?.[0]; if (f) importBackup(f); event.target.value = ""; }} />
+        </label>
+      </div>
 
       <div className={styles.tableScroll}>
         {tab === "positions" && (packets.length ? (

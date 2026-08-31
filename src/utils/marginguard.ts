@@ -4,6 +4,7 @@
 // same Poseidon layout. Parity is asserted by the Cairo test that cross-checks these values
 // against scripts/gen_signature_vector.mjs, so what the UI shows is what the contract stores.
 
+import { derivePosition } from "./keyvault";
 import { RpcProvider, hash, shortString, num, ec } from "starknet";
 
 // ─── MAINNET deployment (full system, verified on-chain 2026-08-28) ─────────
@@ -389,4 +390,41 @@ export async function readPoolRegistration(address: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Finds this wallet's positions by regenerating their ids from the seed.
+ *
+ * Position ids are derived, not random, so the full set can be rebuilt from the wallet
+ * alone - no local state required. Scanning stops after `gap` consecutive misses so a
+ * cancelled or never-submitted index does not truncate the walk.
+ */
+export async function scanPositions(seed: string, limit = 64, gap = 3) {
+  const found: { index: number; positionId: string; open: boolean; liquidated: boolean }[] = [];
+  let misses = 0;
+  for (let index = 0; index < limit && misses < gap; index++) {
+    const { id } = derivePosition(seed, index);
+    try {
+      const view = await readPosition(id);
+      if (!view.exists) { misses++; continue; }
+      misses = 0;
+      found.push({ index, positionId: id, open: view.open, liquidated: view.liquidated });
+    } catch {
+      misses++;
+    }
+  }
+  return found;
+}
+
+/** The first derivation index with no position recorded against it. */
+export async function nextPositionIndex(seed: string, limit = 64) {
+  for (let index = 0; index < limit; index++) {
+    const { id } = derivePosition(seed, index);
+    try {
+      if (!(await readPosition(id)).exists) return index;
+    } catch {
+      return index;
+    }
+  }
+  return limit;
 }

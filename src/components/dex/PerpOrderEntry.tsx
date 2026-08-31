@@ -9,11 +9,12 @@ import {
   MG,
   SIDE_BUY,
   SIDE_SELL,
+  nextPositionIndex,
   positionCommitment,
-  randomFelt,
   readProvider,
   traderCommitment,
 } from "@/utils/marginguard";
+import { derivePosition, unlockSeed } from "@/utils/keyvault";
 import {
   PRICE_SCALE,
   STRK_DECIMALS,
@@ -69,15 +70,17 @@ export function PerpOrderEntry({ enginePrice }: { enginePrice: bigint | null }) 
     if (sizeRaw <= 0n) { setMessage("Enter a size greater than zero."); return; }
     if (marginRaw <= 0n) { setMessage("That size is too small to post any margin at this leverage."); return; }
 
-    const positionId = randomFelt();
-    const ownerSecret = randomFelt();
-    const salt = randomFelt();
     const sideCode = side === "long" ? SIDE_BUY : SIDE_SELL;
-    // Only the commitment reaches the chain: side, size, entry, margin and leverage stay here.
-    const commitment = positionCommitment(sideCode, sizeRaw, enginePrice, marginRaw, leverage, salt);
-
     try {
       setBusy(true);
+      // Keys come from a wallet signature, so nothing secret is ever stored. The same
+      // wallet reproduces them anywhere, which is what makes a lost browser survivable.
+      setMessage("Sign to derive your trading keys. They are recomputed from your wallet, never stored.");
+      const seed = await unlockSeed(account);
+      const index = await nextPositionIndex(seed);
+      const { id: positionId, ownerSecret, salt } = derivePosition(seed, index);
+      // Only the commitment reaches the chain: side, size, entry, margin and leverage stay local.
+      const commitment = positionCommitment(sideCode, sizeRaw, enginePrice, marginRaw, leverage, salt);
       setMessage("Confirm the position. Only its commitment is written on-chain, so size, entry and margin stay private.");
       const result = await account.execute([{
         contractAddress: MG.perpEngine,
@@ -93,9 +96,8 @@ export function PerpOrderEntry({ enginePrice }: { enginePrice: bigint | null }) 
       setTxHash(result.transaction_hash);
       await waitFor(result.transaction_hash);
       const packet: PerpPacket = {
+        index,
         positionId,
-        ownerSecret,
-        salt,
         side: sideCode,
         size: sizeRaw.toString(),
         entryPrice: enginePrice.toString(),

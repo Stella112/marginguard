@@ -6,9 +6,9 @@
  * clears them when the tab closes.
  */
 export type PerpPacket = {
+  /** Derivation index. The owner secret, salt and id all come from the wallet seed. */
+  index: number;
   positionId: string;
-  ownerSecret: string;
-  salt: string;
   side: number;
   size: string;
   entryPrice: string;
@@ -22,18 +22,14 @@ const KEY = "marginguard.perp-positions";
 export const PERP_EVENT = "marginguard:positions";
 
 /**
- * Packets live in localStorage, not sessionStorage.
+ * Position economics, cached locally.
  *
- * The reveal packet is the ONLY way to close a position: `close_position` needs the
- * owner secret and salt to reproduce the commitment, and both are 248-bit random values
- * that cannot be recovered or brute-forced. sessionStorage is cleared when the tab
- * closes, which silently stranded an open position on mainnet - the position stays open
- * forever with no way to settle it.
+ * No secret is stored here any more. The owner secret, salt and position id are derived
+ * from a wallet signature (see utils/keyvault), so this cache holds only the committed
+ * economics - the same figures that become public when the position closes. Losing it is
+ * recoverable: the ids are derivable, so open positions can be found by scanning the chain.
  *
- * The trade-off is that the secrets now persist on disk for this origin rather than
- * evaporating with the tab. That is the right side to err on: a stranded position is
- * permanent, while a persisted secret is scoped to a browser profile the user controls
- * and can be cleared deliberately.
+ * Stealing this file therefore gains an attacker nothing spendable.
  */
 export function readPackets(): PerpPacket[] {
   try {

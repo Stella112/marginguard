@@ -360,3 +360,114 @@ fn a_false_side_reveal_cannot_claim_the_wrong_token() {
     // The buy order was committed as SIDE_BUY; claiming it as SIDE_SELL breaks the commitment.
     claim(w, BUYER_SECRET, 'buy1', SIDE_SELL, BUY_PRICE, SIZE, BUY_SALT, 'note_buy');
 }
+
+// ─── Withdraw and Cancel ───────────────────────────────────────────────────────
+//
+// Before these existed the venue was a one-way door: funds entered on Fund and left only
+// on Claim, which needs a matched order. An order that never found a counterparty trapped
+// its reserve permanently, with no path out for anyone.
+
+/// Drives a Withdraw invoke as the pool.
+fn withdraw(
+    w: World, owner_secret: felt252, token: IMockErc20Dispatcher, amount: u128, note_id: felt252,
+) {
+    set_contract_address(pool());
+    w
+        .venue
+        .privacy_invoke(
+            VenueOperation::Withdraw, 0, token.contract_address, amount, owner_secret, 0, 0, 0,
+            0, 0, note_id,
+        );
+    set_contract_address(0.try_into().unwrap());
+}
+
+/// Drives a Cancel invoke as the pool.
+fn cancel(w: World, owner_secret: felt252, order_id: felt252) {
+    set_contract_address(pool());
+    w
+        .venue
+        .privacy_invoke(
+            VenueOperation::Cancel, 0, 0.try_into().unwrap(), 0, owner_secret, order_id, 0, 0,
+            0, 0, 0,
+        );
+    set_contract_address(0.try_into().unwrap());
+}
+
+#[test]
+fn a_free_balance_can_be_withdrawn() {
+    let w = setup();
+    let seller = compute_trader_commitment(SELLER_SECRET);
+    fund(w, w.base, seller, SELL_RESERVE_BASE);
+    assert(w.venue.balance_of(seller, w.base.contract_address) == SELL_RESERVE_BASE, 'funded');
+
+    withdraw(w, SELLER_SECRET, w.base, SELL_RESERVE_BASE, 'note1');
+
+    assert(w.venue.balance_of(seller, w.base.contract_address) == 0, 'balance drained');
+    // Approve, never transfer: the pool pulls the funds itself.
+    assert(
+        w.base.allowance(w.venue_addr, pool()) == SELL_RESERVE_BASE.into(), 'pool approved',
+    );
+}
+
+#[test]
+#[should_panic(expected: ('INSUFFICIENT_BALANCE', 'ENTRYPOINT_FAILED'))]
+fn withdrawing_more_than_the_balance_is_refused() {
+    let w = setup();
+    fund(w, w.base, compute_trader_commitment(SELLER_SECRET), SELL_RESERVE_BASE);
+    withdraw(w, SELLER_SECRET, w.base, SELL_RESERVE_BASE + 1, 'note1');
+}
+
+#[test]
+#[should_panic(expected: ('INSUFFICIENT_BALANCE', 'ENTRYPOINT_FAILED'))]
+fn a_wrong_secret_cannot_withdraw() {
+    let w = setup();
+    fund(w, w.base, compute_trader_commitment(SELLER_SECRET), SELL_RESERVE_BASE);
+    // Entitlement is the secret: a different one derives a different commitment, whose
+    // balance is zero.
+    withdraw(w, BUYER_SECRET, w.base, SELL_RESERVE_BASE, 'note1');
+}
+
+#[test]
+#[should_panic(expected: ('INSUFFICIENT_BALANCE', 'ENTRYPOINT_FAILED'))]
+fn a_live_order_s_reserve_cannot_be_withdrawn() {
+    let w = setup();
+    fund_and_place(w);
+    // The reserve is held against the order, not sitting in the free balance.
+    withdraw(w, SELLER_SECRET, w.base, SELL_RESERVE_BASE, 'note1');
+}
+
+#[test]
+fn cancelling_releases_the_reserve_and_it_can_then_be_withdrawn() {
+    let w = setup();
+    fund_and_place(w);
+    let seller = compute_trader_commitment(SELLER_SECRET);
+    assert(w.venue.balance_of(seller, w.base.contract_address) == 0, 'all reserved');
+
+    cancel(w, SELLER_SECRET, 'sell1');
+
+    assert(!w.book.is_live('sell1'), 'no longer live');
+    assert(
+        w.venue.balance_of(seller, w.base.contract_address) == SELL_RESERVE_BASE, 'released',
+    );
+
+    withdraw(w, SELLER_SECRET, w.base, SELL_RESERVE_BASE, 'note1');
+    assert(w.venue.balance_of(seller, w.base.contract_address) == 0, 'withdrawn');
+    assert(w.base.allowance(w.venue_addr, pool()) == SELL_RESERVE_BASE.into(), 'approved');
+}
+
+#[test]
+#[should_panic(expected: ('BAD_OWNER_SECRET', 'ENTRYPOINT_FAILED', 'ENTRYPOINT_FAILED'))]
+fn a_wrong_secret_cannot_cancel() {
+    let w = setup();
+    fund_and_place(w);
+    cancel(w, BUYER_SECRET, 'sell1');
+}
+
+#[test]
+#[should_panic(expected: ('NOT_LIVE', 'ENTRYPOINT_FAILED', 'ENTRYPOINT_FAILED'))]
+fn an_order_cannot_be_cancelled_twice() {
+    let w = setup();
+    fund_and_place(w);
+    cancel(w, SELLER_SECRET, 'sell1');
+    cancel(w, SELLER_SECRET, 'sell1');
+}

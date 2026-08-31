@@ -45,6 +45,18 @@ pub enum VenueOperation {
     Fund,
     /// Pay out a matched order's proceeds into the caller's open note.
     Claim,
+    /// Return a free (unreserved) venue balance to the owner's open note.
+    ///
+    /// Without this the venue is a one-way door: funds enter on Fund and leave only on
+    /// Claim, which needs a matched order, so an order that never found a counterparty
+    /// trapped its reserve permanently. Cancel releases a reserve back to the balance;
+    /// this is how that balance gets out.
+    Withdraw,
+    /// Cancel a live order and release its reserve back to the owner's venue balance.
+    ///
+    /// Routed through the pool like every other leg. Calling the book directly would link
+    /// the canceller's address to the order id and undo the anonymity the venue exists for.
+    Cancel,
 }
 
 #[starknet::interface]
@@ -164,6 +176,8 @@ pub mod MarginGuardVenue {
         Funded: Funded,
         OrderReserved: OrderReserved,
         Claimed: Claimed,
+        Withdrawn: Withdrawn,
+        OrderCancelled: OrderCancelled,
     }
 
     /// The funding amount is public regardless — the pool's withdraw leg is a public
@@ -186,6 +200,23 @@ pub mod MarginGuardVenue {
 
     #[derive(Drop, starknet::Event)]
     pub struct Claimed {
+        #[key]
+        pub order_id: felt252,
+        pub token: ContractAddress,
+        pub amount: u128,
+    }
+
+    /// Keyed by commitment, never by address - the same identity rule as Funded.
+    #[derive(Drop, starknet::Event)]
+    pub struct Withdrawn {
+        #[key]
+        pub trader_commitment: felt252,
+        pub token: ContractAddress,
+        pub amount: u128,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct OrderCancelled {
         #[key]
         pub order_id: felt252,
         pub token: ContractAddress,
@@ -227,6 +258,9 @@ pub mod MarginGuardVenue {
                 VenueOperation::Fund => self.do_fund(trader_commitment, token, amount),
                 VenueOperation::Claim => self
                     .do_claim(pool, owner_secret, order_id, side, price, size, salt, note_id),
+                VenueOperation::Withdraw => self
+                    .do_withdraw(pool, owner_secret, token, amount, note_id),
+                VenueOperation::Cancel => self.do_cancel(owner_secret, order_id),
             }
         }
 
@@ -320,6 +354,70 @@ pub mod MarginGuardVenue {
 
             // Funds stay parked. Nothing to credit into a note yet.
             [].span()
+        }
+
+        /// Cancels a live order and returns its reserve to the owner's venue balance.
+        ///
+        /// The book verifies the secret and the order's state, then this releases the
+        /// reserve. Withdraw is the separate step that takes the balance out of the venue -
+        /// two pool transactions, because a pool transaction carries at most one invoke.
+        fn do_cancel(
+            ref self: ContractState, owner_secret: felt252, order_id: felt252,
+        ) -> Span<OpenNoteDeposit> {
+            // The book re-derives the trader commitment and refuses a matched or dead order.
+            IOrderBookDispatcher { contract_address: self.order_book.read() }
+                .cancel_order(order_id, owner_secret);
+
+            let token = self.reserved_token.read(order_id);
+            let amount = self.reserved_amount.read(order_id);
+            if amount.is_non_zero() {
+                // Clear the reserve before crediting so a repeated call cannot double-credit.
+                self.reserved_amount.write(order_id, 0);
+                let trader_commitment = compute_trader_commitment(owner_secret);
+                let key = (trader_commitment, token);
+                let balance_u256: u256 = self.balances.read(key).into() + amount.into();
+                let balance: u128 = balance_u256.try_into().expect(errors::CREDIT_OVERFLOW);
+                self.balances.write(key, balance);
+            }
+
+            self.emit(OrderCancelled { order_id, token, amount });
+
+            // Nothing leaves the venue here; the balance is withdrawn separately.
+            [].span()
+        }
+
+        /// Returns a free venue balance to the owner, credited into an open note.
+        ///
+        /// Mirrors Claim's identity rule: entitlement is the owner secret, never an address.
+        /// Only the unreserved balance can leave this way - a live order's reserve is held in
+        /// `reserved_amount` and is released by `cancel_order` first.
+        fn do_withdraw(
+            ref self: ContractState,
+            pool: ContractAddress,
+            owner_secret: felt252,
+            token: ContractAddress,
+            amount: u128,
+            note_id: felt252,
+        ) -> Span<OpenNoteDeposit> {
+            assert(token.is_non_zero(), errors::ZERO_TOKEN);
+            assert(amount.is_non_zero(), errors::ZERO_AMOUNT);
+
+            let trader_commitment = compute_trader_commitment(owner_secret);
+            let key = (trader_commitment, token);
+            let balance = self.balances.read(key);
+            assert(balance >= amount, errors::INSUFFICIENT_BALANCE);
+            self.balances.write(key, balance - amount);
+
+            let credited = self.total_credited.read(token);
+            assert(credited >= amount, errors::TOTAL_CREDITED_UNDERFLOW);
+            self.total_credited.write(token, credited - amount);
+
+            // Approve, do not transfer - the pool executes the pull itself (rule 2).
+            IErc20Dispatcher { contract_address: token }.approve(pool, amount.into());
+
+            self.emit(Withdrawn { trader_commitment, token, amount });
+
+            [OpenNoteDeposit { note_id, token, amount }].span()
         }
 
         /// Pays a matched order's proceeds into the claimant's open note.

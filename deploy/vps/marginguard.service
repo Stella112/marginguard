@@ -1,0 +1,33 @@
+# systemd unit for the MarginGuard frontend.
+#
+# `next start` is a long-running Node server, not a static bundle - the /api/market route is
+# rendered on demand. systemd is what keeps it alive across crashes and reboots; without it a
+# single OOM or a reboot silently takes the site down.
+#
+# Install:
+#   sudo cp marginguard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now marginguard
+#   systemctl status marginguard
+
+[Unit]
+Description=MarginGuard frontend (Next.js)
+After=network-info.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/srv/marginguard
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# Every NEXT_PUBLIC_* var has a working default and the RPC falls back to mainnet lava,
+# so the app runs with none set. Add overrides here if you need them.
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+# The app holds no secrets: keys are derived in the user's browser from a wallet signature.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

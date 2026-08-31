@@ -116,7 +116,7 @@ export function PerpOrderEntry({ enginePrice }: { enginePrice: bigint | null }) 
   }
 
   return (
-    <div className={styles.orderEntry}>
+    <section className={styles.entry}>
       <div className={styles.sideTabs}>
         <button
           className={`${styles.sideTab} ${side === "long" ? styles.sideTabLong : ""}`}
@@ -224,7 +224,7 @@ export function PerpOrderEntry({ enginePrice }: { enginePrice: bigint | null }) 
         Margin is a committed figure, not escrowed collateral. Reveal packets live in this browser
         session only, and without one the contract cannot verify your ownership at close.
       </p>
-    </div>
+    </section>
   );
 }
 

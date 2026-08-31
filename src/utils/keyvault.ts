@@ -20,8 +20,18 @@ import { hash, num, type TypedData } from "starknet";
  * never leaves the page.
  */
 
+/**
+ * The chain id is pinned rather than read from the wallet.
+ *
+ * It is part of the signed message, so the derived keys change if it ever changes. Reading
+ * it at runtime would make the whole key tree depend on a lookup that can differ between
+ * wallet builds - or fail outright, as `account.getChainId` did. This app is mainnet-only,
+ * so the value is a constant and the derivation is stable forever.
+ */
+const CHAIN_ID = "SN_MAIN";
+
 /** Fixed, human-readable, and free of nonces or timestamps, so the signature is stable. */
-export function keyMessage(chainId: string): TypedData {
+export function keyMessage(chainId: string = CHAIN_ID): TypedData {
   return {
     domain: { name: "MarginGuard", version: "1", chainId },
     types: {
@@ -118,8 +128,7 @@ export async function unlockSeed(account: any): Promise<string> {
   if (!address) throw new Error("Connect a wallet first.");
   const existing = cachedSeed(address);
   if (existing) return existing;
-  const chainId = await account.getChainId();
-  const signature = await account.signMessage(keyMessage(chainId));
+  const signature = await account.signMessage(keyMessage());
   const seed = seedFromSignature(signature);
   cacheSeed(address, seed);
   return seed;

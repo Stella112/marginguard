@@ -6,13 +6,14 @@ import { num } from "starknet";
 import { Database, ExternalLink, EyeOff, GitMerge, KeyRound, LockKeyhole } from "lucide-react";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
 import { MG, readOrderState, readProvider } from "@/utils/marginguard";
+import { deriveOrder, unlockSeed } from "@/utils/keyvault";
 import { readSpotOrders, writeSpotOrders } from "./perpPackets";
 import styles from "@/app/terminal.module.css";
 
 type Tab = "positions" | "orders" | "logs";
 type StoredOrder = {
   orderId: string;
-  ownerSecret?: string;
+  index?: string;
   salt?: string;
   baseToken?: string;
   quoteToken?: string;
@@ -93,13 +94,14 @@ export function DataPanel() {
       && candidate.side !== order.side
       && candidate.baseToken && candidate.baseToken === order.baseToken
       && candidate.quoteToken && candidate.quoteToken === order.quoteToken
-      && candidate.ownerSecret && candidate.priceUnits && candidate.sizeUnits && candidate.salt);
+      && candidate.index !== undefined && candidate.priceUnits && candidate.sizeUnits);
   }
 
   async function matchOrder(order: LiveOrder) {
     const other = counterpartyFor(order);
     if (!account) { setNotice("Connect a wallet to submit the permissionless match transaction."); return; }
-    if (!other || !order.priceUnits || !order.sizeUnits || !order.salt || !other.priceUnits || !other.sizeUnits || !other.salt) {
+    if (!other || !order.priceUnits || !order.sizeUnits || order.index === undefined
+      || !other.priceUnits || !other.sizeUnits || other.index === undefined) {
       setNotice("Matching needs two compatible orders with their private reveal packets in this browser session.");
       return;
     }
@@ -108,10 +110,13 @@ export function DataPanel() {
     try {
       setBusy(`match:${order.orderId}`);
       setNotice("Confirm the public match transaction. Terms are revealed to the contract only at matching.");
+      const seed = await unlockSeed(account);
+      const buyKeys = deriveOrder(seed, Number(buy.index));
+      const sellKeys = deriveOrder(seed, Number(sell.index));
       const result = await account.execute([{
         contractAddress: MG.orderBook,
         entrypoint: "match_orders",
-        calldata: [buy.orderId, buy.priceUnits!, buy.sizeUnits!, buy.salt!, sell.orderId, sell.priceUnits!, sell.sizeUnits!, sell.salt!],
+        calldata: [buy.orderId, buy.priceUnits!, buy.sizeUnits!, buyKeys.salt, sell.orderId, sell.priceUnits!, sell.sizeUnits!, sellKeys.salt],
       }]);
       await waitFor(result.transaction_hash);
       writeStoredOrders((item) => item.orderId === buy.orderId || item.orderId === sell.orderId ? { ...item, matchTx: result.transaction_hash } : item);
@@ -127,7 +132,7 @@ export function DataPanel() {
   async function claimOrder(order: LiveOrder) {
     if (!account) { setNotice("Connect a wallet to claim the matched leg."); return; }
     if (!supportsStrk20(walletApi)) { setNotice("Reconnect with a wallet advertising STRK20 Wallet API 0.10.3 or newer."); return; }
-    if (!order.ownerSecret || !order.priceUnits || !order.sizeUnits || !order.salt || !order.baseToken || !order.quoteToken) {
+    if (order.index === undefined || !order.priceUnits || !order.sizeUnits || !order.baseToken || !order.quoteToken) {
       setNotice("This order predates the claim flow. Place a new order in this browser session.");
       return;
     }
@@ -137,12 +142,14 @@ export function DataPanel() {
       setNotice("Confirm the STRK20 claim. The matched payout will be credited to an open note.");
       // Addresses are hex-normalized for the wallet; the "OPEN" and ${openNoteIds[0]}
       // placeholders are literal strings and must NOT be normalized.
+      const seed = await unlockSeed(account);
+      const { ownerSecret, salt } = deriveOrder(seed, Number(order.index));
       const actions: STRK20_ACTION[] = [
         { type: "transfer", token: num.toHex(payoutToken), amount: "OPEN", recipient: num.toHex(account.address) },
         {
           type: "invoke",
           contract: num.toHex(MG.venue),
-          calldata: ["0x1", "0x0", "0x0", "0x0", num.toHex(order.ownerSecret), num.toHex(order.orderId), order.side === "buy" ? "0x0" : "0x1", order.priceUnits, order.sizeUnits, num.toHex(order.salt), "${openNoteIds[0]}"],
+          calldata: ["0x1", "0x0", "0x0", "0x0", ownerSecret, num.toHex(order.orderId), order.side === "buy" ? "0x0" : "0x1", order.priceUnits, order.sizeUnits, salt, "${openNoteIds[0]}"],
         },
       ];
       const result = await account.strk20InvokeTransaction(actions);

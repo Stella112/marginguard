@@ -4,7 +4,7 @@
 // same Poseidon layout. Parity is asserted by the Cairo test that cross-checks these values
 // against scripts/gen_signature_vector.mjs, so what the UI shows is what the contract stores.
 
-import { derivePosition } from "./keyvault";
+import { derivePosition, deriveOrder } from "./keyvault";
 import { RpcProvider, hash, shortString, num, ec } from "starknet";
 
 // ─── MAINNET deployment (full system, verified on-chain 2026-08-28) ─────────
@@ -422,6 +422,25 @@ export async function nextPositionIndex(seed: string, limit = 64) {
     const { id } = derivePosition(seed, index);
     try {
       if (!(await readPosition(id)).exists) return index;
+    } catch {
+      return index;
+    }
+  }
+  return limit;
+}
+
+/** True once an order id has been used, whatever lifecycle stage it has reached. */
+export async function orderExists(orderId: string) {
+  const [commitment] = await call(MG.orderBook, "get_order", [orderId]);
+  return BigInt(commitment) !== 0n;
+}
+
+/** The first derivation index with no order recorded against it. */
+export async function nextOrderIndex(seed: string, limit = 64) {
+  for (let index = 0; index < limit; index++) {
+    const { id } = deriveOrder(seed, index);
+    try {
+      if (!(await orderExists(id))) return index;
     } catch {
       return index;
     }

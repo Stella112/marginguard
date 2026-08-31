@@ -7,7 +7,8 @@ import { num } from "starknet";
 import { fmtPrice } from "./data";
 import styles from "@/app/terminal.module.css";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
-import { readSpotOrders, writeSpotOrders } from "./perpPackets";
+import { formatUnits, readSpotOrders, writeSpotOrders } from "./perpPackets";
+import { deriveOrder, unlockSeed } from "@/utils/keyvault";
 import {
   MG,
   SPOT_MARKETS,
@@ -15,7 +16,7 @@ import {
   SIDE_BUY,
   SIDE_SELL,
   orderCommitment,
-  randomFelt,
+  nextOrderIndex,
   readPoolRegistration,
   readProvider,
   traderCommitment,
@@ -78,10 +79,9 @@ function shortHash(hash: string): string {
 function rememberOrder(record: Record<string, string>) {
   try {
     const current = readSpotOrders();
-    // Keep the owner secret in the current browser session only. It is required
-    // for a later claim/cancel and must not survive as a durable localStorage secret.
+    // No secret is kept here: the owner secret and salt are derived from the wallet, so
+    // this record holds only the order's economics and its derivation index.
     writeSpotOrders([record, ...current].slice(0, 20));
-    localStorage.removeItem("marginguard.spot-orders");
   } catch {
     // Local persistence is convenience only; the chain remains authoritative.
   }
@@ -315,9 +315,11 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
       // These values never leave the browser in plaintext. The venue receives
       // only the trader and order commitments during placement. The owner
       // secret is needed later to cancel or claim this order.
-      const ownerSecret = randomFelt();
-      const salt = randomFelt();
-      const orderId = randomFelt();
+      // Derived from a wallet signature, so nothing spendable is written to disk and the
+      // same wallet reproduces these keys on any machine.
+      const seed = await unlockSeed(account);
+      const orderIndex = await nextOrderIndex(seed);
+      const { id: orderId, ownerSecret, salt } = deriveOrder(seed, orderIndex);
       const trader = traderCommitment(ownerSecret);
       const orderCommit = orderCommitment(side === "buy" ? SIDE_BUY : SIDE_SELL, priceUnits, sizeUnits, salt);
       const reserveToken = side === "buy" ? marketConfig.quoteToken : marketConfig.baseToken;
@@ -371,8 +373,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
 
       rememberOrder({
         orderId,
-        ownerSecret,
-        salt,
+        index: String(orderIndex),
         baseToken: marketConfig.baseToken,
         quoteToken: marketConfig.quoteToken,
         priceUnits: priceUnits.toString(),
@@ -384,7 +385,7 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         placementTx: placed.transaction_hash,
       });
       window.dispatchEvent(new Event("marginguard:orders"));
-      setMessage(`Order live. It is backed by ${reserveAmount.toString()} ${reserveLabel} units and waiting for a counterparty.`);
+      setMessage(`Order live, backed by ${formatUnits(reserveAmount, reserveDecimals)} ${reserveLabel} held in the venue. It stays private until a counterparty commitment matches it.`);
     } catch (error: any) {
       setMessage(explainStrk20Error(error));
     } finally {

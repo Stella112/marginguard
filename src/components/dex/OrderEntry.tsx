@@ -17,6 +17,7 @@ import {
   SIDE_SELL,
   orderCommitment,
   nextOrderIndex,
+  VENUE_SUPPORTS_CANCEL,
   readPoolRegistration,
   readProvider,
   traderCommitment,
@@ -304,6 +305,16 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
     try {
       setBusy(true);
       if (!marketConfig.available) throw new Error(marketConfig.note ?? "This market is not available yet.");
+      // The deployed venue has no Cancel or Withdraw, so funds sent to back an order
+      // cannot be released by anyone - not the owner, not the deployer. Refusing here is
+      // the only honest behaviour: the alternative is silently consuming a visitor's STRK.
+      if (!VENUE_SUPPORTS_CANCEL) {
+        throw new Error(
+          "Spot order placement is disabled. The deployed venue cannot return funds that back "
+          + "an unmatched order, so placing one would lock your STRK permanently. The fix is "
+          + "deployed in the contracts and awaiting a venue redeploy. Perpetuals are unaffected.",
+        );
+      }
       const sizeUnits = parseUnits(size, marketConfig.baseDecimals);
       const quoteUnits = parseUnits(price, marketConfig.quoteDecimals);
       const priceUnits = (quoteUnits * 10n ** 18n) / (10n ** BigInt(marketConfig.baseDecimals));
@@ -593,7 +604,18 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         </div>
         <div className={styles.collateralRow}><span>Verified oracle mark</span><span className={`${styles.collateralValue} ${styles.collateralMain}`}>{mark ? fmtPrice(mark) : "—"}</span></div>
       </div>
-      <button onClick={submitOrder} disabled={busy} className={`${styles.submit} ${accent}`}><ShieldCheck size={14} />{busy ? "Processing…" : "Place shielded order"}</button>
+      {!VENUE_SUPPORTS_CANCEL && (
+        <div style={{
+          margin: "0 0 8px", padding: "8px 10px", borderRadius: 6, fontSize: 10.5, lineHeight: 1.5,
+          border: "1px solid rgba(244,91,105,0.4)", background: "rgba(244,91,105,0.09)", color: "#ffb3ba",
+        }}>
+          <strong style={{ display: "block", marginBottom: 3 }}>Spot placement disabled</strong>
+          The deployed venue cannot return funds backing an unmatched order, so placing one would
+          lock your STRK permanently. Cancel and Withdraw are written and tested, awaiting a venue
+          redeploy. Perpetuals are unaffected and fully usable.
+        </div>
+      )}
+      <button onClick={submitOrder} disabled={busy || !VENUE_SUPPORTS_CANCEL} className={`${styles.submit} ${accent}`}><ShieldCheck size={14} />{busy ? "Processing…" : "Place shielded order"}</button>
       {message && <div className={`${styles.proof} ${message.includes("Order live") ? styles.positive : styles.negative}`}><div className={styles.proofStep}><KeyRound size={12} />{message}</div>{txHash && <a href={`${EXPLORER}${txHash}`} target="_blank" rel="noreferrer" className={styles.txLink}>{shortHash(txHash)} <ExternalLink size={11} /></a>}</div>}
       <p className={styles.entryFoot}><KeyRound size={11} style={{ verticalAlign: "-2px", marginRight: 5 }} />Funding and placement are separate by design. Your price and size are committed privately; the chain sees only lifecycle flags until matching.</p>
     </div>

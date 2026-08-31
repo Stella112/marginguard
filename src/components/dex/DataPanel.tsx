@@ -5,7 +5,7 @@ import type { STRK20_ACTION } from "@starknet-io/types-js";
 import { num } from "starknet";
 import { Database, ExternalLink, EyeOff, GitMerge, KeyRound, LockKeyhole } from "lucide-react";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
-import { MG, VENUE_OP, readOrderState, readProvider, readVenueReserve } from "@/utils/marginguard";
+import { MG, VENUE_OP, VENUE_SUPPORTS_CANCEL, readOrderState, readProvider, readVenueReserve } from "@/utils/marginguard";
 import { deriveOrder, unlockSeed } from "@/utils/keyvault";
 import { readSpotOrders, writeSpotOrders } from "./perpPackets";
 import styles from "@/app/terminal.module.css";
@@ -261,8 +261,8 @@ export function DataPanel() {
               <td><span className={styles.actionGroup}>
                 {order.matched && !order.claimed && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => claimOrder(order)}>{busy === `claim:${order.orderId}` ? "Claiming…" : "Claim"}</button>}
                 {order.live && !order.matched && other && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => matchOrder(order)}>{busy === `match:${order.orderId}` ? "Matching…" : "Match"}</button>}
-                {order.live && !order.matched && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => cancelOrder(order)}>{busy === `cancel:${order.orderId}` ? "Cancelling…" : "Cancel"}</button>}
-                {order.releasedAmount && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => withdrawReleased(order)}>{busy === `withdraw:${order.orderId}` ? "Withdrawing…" : "Withdraw"}</button>}
+                {VENUE_SUPPORTS_CANCEL && order.live && !order.matched && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => cancelOrder(order)}>{busy === `cancel:${order.orderId}` ? "Cancelling…" : "Cancel"}</button>}
+                {VENUE_SUPPORTS_CANCEL && order.releasedAmount && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => withdrawReleased(order)}>{busy === `withdraw:${order.orderId}` ? "Withdrawing…" : "Withdraw"}</button>}
                 <a href={"https://voyager.online/tx/" + (order.matchTx ?? order.placementTx)} target="_blank" rel="noreferrer" className={styles.txLink}><ExternalLink size={11} />view</a>
               </span></td>
             </tr>;

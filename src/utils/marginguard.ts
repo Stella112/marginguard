@@ -459,3 +459,15 @@ export async function readVenueReserve(orderId: string): Promise<{ token: string
  * Fund, Claim, Withdraw, Cancel - the pool deserializes by index, so order matters.
  */
 export const VENUE_OP = { fund: "0x0", claim: "0x1", withdraw: "0x2", cancel: "0x3" } as const;
+
+/**
+ * Whether the deployed venue understands Cancel and Withdraw.
+ *
+ * The live venue predates them, so the wallet's simulation fails to deserialize the
+ * operation and surfaces INVALID_REQUEST_PAYLOAD - a confusing error for a button that
+ * cannot work. The controls stay hidden until the venue is redeployed.
+ *
+ * Flip to true after running scripts/deploy/redeploy_venue_mainnet.mjs and updating
+ * MG.orderBook and MG.venue above.
+ */
+export const VENUE_SUPPORTS_CANCEL = false;

@@ -21,17 +21,46 @@ const KEY = "marginguard.perp-positions";
 /** Order entry and the positions panel are siblings, so they sync through this event. */
 export const PERP_EVENT = "marginguard:positions";
 
+/**
+ * Packets live in localStorage, not sessionStorage.
+ *
+ * The reveal packet is the ONLY way to close a position: `close_position` needs the
+ * owner secret and salt to reproduce the commitment, and both are 248-bit random values
+ * that cannot be recovered or brute-forced. sessionStorage is cleared when the tab
+ * closes, which silently stranded an open position on mainnet - the position stays open
+ * forever with no way to settle it.
+ *
+ * The trade-off is that the secrets now persist on disk for this origin rather than
+ * evaporating with the tab. That is the right side to err on: a stranded position is
+ * permanent, while a persisted secret is scoped to a browser profile the user controls
+ * and can be cleared deliberately.
+ */
 export function readPackets(): PerpPacket[] {
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed as PerpPacket[] : [];
+    const stored = localStorage.getItem(KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? parsed as PerpPacket[] : [];
+    }
+    // Migrate anything still held by the previous session-scoped build.
+    const legacy = sessionStorage.getItem(KEY);
+    if (!legacy) return [];
+    const parsed = JSON.parse(legacy);
+    if (!Array.isArray(parsed)) return [];
+    localStorage.setItem(KEY, legacy);
+    return parsed as PerpPacket[];
   } catch {
     return [];
   }
 }
 
 export function writePackets(next: PerpPacket[]) {
-  sessionStorage.setItem(KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    // A full or blocked store must not lose the packet silently.
+    sessionStorage.setItem(KEY, JSON.stringify(next));
+  }
   window.dispatchEvent(new Event(PERP_EVENT));
 }
 
@@ -99,4 +128,34 @@ export function riskOf(packet: Pick<PerpPacket, "side" | "size" | "entryPrice" |
     equity,
     liquidatable: loss > 0n && equity < (margin * MAINTENANCE_BPS) / BPS_DENOMINATOR,
   };
+}
+
+/**
+ * Spot reveal packets, held in localStorage.
+ *
+ * These carry the owner secret and salt that `match_orders` and the venue claim need.
+ * Session-scoped storage loses them when the tab closes, which strands a live order
+ * with no way to match or claim it - the same failure that stranded a perp position.
+ */
+const SPOT_KEY = "marginguard.spot-orders";
+
+export function readSpotOrders(): any[] {
+  try {
+    const stored = localStorage.getItem(SPOT_KEY) ?? sessionStorage.getItem(SPOT_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    localStorage.setItem(SPOT_KEY, stored);
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+export function writeSpotOrders(next: any[]) {
+  try {
+    localStorage.setItem(SPOT_KEY, JSON.stringify(next));
+  } catch {
+    sessionStorage.setItem(SPOT_KEY, JSON.stringify(next));
+  }
 }

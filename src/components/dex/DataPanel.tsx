@@ -6,6 +6,7 @@ import { num } from "starknet";
 import { Database, ExternalLink, EyeOff, GitMerge, KeyRound, LockKeyhole } from "lucide-react";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
 import { MG, readOrderState, readProvider } from "@/utils/marginguard";
+import { readSpotOrders, writeSpotOrders } from "./perpPackets";
 import styles from "@/app/terminal.module.css";
 
 type Tab = "positions" | "orders" | "logs";
@@ -28,8 +29,7 @@ const Th = ({ children }: { children: React.ReactNode }) => <th>{children}</th>;
 
 function readStoredOrders(): StoredOrder[] {
   try {
-    const parsed = JSON.parse(sessionStorage.getItem("marginguard.spot-orders") ?? "[]");
-    return Array.isArray(parsed) ? parsed as StoredOrder[] : [];
+    return readSpotOrders() as StoredOrder[];
   } catch {
     return [];
   }
@@ -37,7 +37,7 @@ function readStoredOrders(): StoredOrder[] {
 
 function writeStoredOrders(update: (order: StoredOrder) => StoredOrder) {
   const next = readStoredOrders().map(update);
-  sessionStorage.setItem("marginguard.spot-orders", JSON.stringify(next));
+  writeSpotOrders(next);
 }
 
 function supportsStrk20(versions: string[]) {

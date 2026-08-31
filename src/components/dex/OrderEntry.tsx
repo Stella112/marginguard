@@ -7,6 +7,7 @@ import { num } from "starknet";
 import { fmtPrice } from "./data";
 import styles from "@/app/terminal.module.css";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
+import { readSpotOrders, writeSpotOrders } from "./perpPackets";
 import {
   MG,
   SPOT_MARKETS,
@@ -76,10 +77,10 @@ function shortHash(hash: string): string {
 
 function rememberOrder(record: Record<string, string>) {
   try {
-    const current = JSON.parse(sessionStorage.getItem("marginguard.spot-orders") ?? "[]");
+    const current = readSpotOrders();
     // Keep the owner secret in the current browser session only. It is required
     // for a later claim/cancel and must not survive as a durable localStorage secret.
-    sessionStorage.setItem("marginguard.spot-orders", JSON.stringify([record, ...current].slice(0, 20)));
+    writeSpotOrders([record, ...current].slice(0, 20));
     localStorage.removeItem("marginguard.spot-orders");
   } catch {
     // Local persistence is convenience only; the chain remains authoritative.

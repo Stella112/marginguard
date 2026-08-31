@@ -117,6 +117,33 @@ Stated plainly, because a privacy claim is only worth what its limits admit.
   pays the liquidator nothing. In production a keeper incentive would be added; its absence means
   liquidations rely on the owner or agent (who have the incentive and the knowledge) to call.
 
+## Client-side key custody
+
+Entitlement in this system is a **secret, not an address**. `do_claim` checks
+`compute_trader_commitment(owner_secret) == entry.trader_commitment`, and `close_position`
+checks the same way. This is deliberate - binding entitlement to an address would link the
+order to a wallet and defeat the privacy the venue exists to provide - but it makes the
+reveal packet a **bearer instrument**: whoever holds it can act, from any wallet.
+
+- **What the packet holds:** the order or position id, the owner secret, the salt, and the
+  committed economics. The secret and salt are 248-bit values from `crypto.getRandomValues`.
+  They cannot be recovered, recomputed, or brute-forced.
+- **Where it lives:** `localStorage` for the app's origin - an unencrypted file in the
+  browser profile on the user's own disk. It is never transmitted; no server, including this
+  app's own, ever receives it.
+- **Consequence of loss:** permanent. A spot order can no longer be matched or claimed; a
+  perp position can never be closed and stays open on-chain forever. This is not theoretical:
+  a live mainnet position was stranded this way when the packet sat in `sessionStorage` and
+  the tab closed. Storage is durable now, but clearing site data still destroys it.
+- **Consequence of theft:** for spot, whoever holds the secret can claim the matched payout
+  into their own open note - real value at risk. For perps it is bounded, because
+  `open_position` escrows nothing and `settle` only records an amount: a thief can force-close
+  a position early but cannot take funds.
+- **Not production-grade key management.** A real deployment would derive these
+  deterministically from a signature so they can be regenerated from the wallet alone, and
+  would offer explicit export and import. Both are future work; today the browser profile is
+  the single point of failure.
+
 ## Operational assumptions
 
 - **Deployment bindings are one-time and must be set right after deploy:** the book's

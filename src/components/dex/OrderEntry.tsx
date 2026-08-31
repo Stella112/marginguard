@@ -54,7 +54,9 @@ function explainStrk20Error(error: any): string {
     return "Your wallet is not registered with the STRK20 privacy pool yet. Registration is handled by the wallet, not by this app: open Ready, use its privacy/shield feature once to register a viewing key, then come back and retry.";
   }
   if (raw.includes("INSUFFICIENT_PRIVATE_BALANCE")) {
-    return "Not enough shielded balance for this action. Shield more of this token first.";
+    return "Not enough SHIELDED balance. Funding an order spends tokens already inside the "
+      + "STRK20 pool, not your public wallet balance - a public balance does not count towards "
+      + "it. Use SHIELD above to move tokens into the pool first, then place the order.";
   }
   if (raw.includes("USER_REFUSED_OP")) {
     return "You declined the request in the wallet.";
@@ -577,6 +579,16 @@ export function OrderEntry({ mark, market = "strk" }: { mark: number; market?: "
         )}
 
         <div className={styles.collateralRow}><span>Reserve required</span><span className={styles.collateralValue}>{reserveLabel}</span></div>
+        {/* The funding step withdraws from the pool, so a public balance cannot back an
+            order. The wallet reports this only as a stalled "waiting for funds" prompt,
+            which gives no clue that the two balances are different. */}
+        <div className={styles.collateralRow}>
+          <span>Reserve source</span>
+          <span className={styles.collateralValue} title="Funding spends tokens held inside the STRK20 pool. Public wallet balance does not count.">
+            <LockKeyhole size={11} style={{ verticalAlign: "-1px", marginRight: 4, color: "#9d4edd" }} />
+            shielded, not public
+          </span>
+        </div>
         <div className={styles.collateralRow}><span>Verified oracle mark</span><span className={`${styles.collateralValue} ${styles.collateralMain}`}>{mark ? fmtPrice(mark) : "—"}</span></div>
       </div>
       <button onClick={submitOrder} disabled={busy} className={`${styles.submit} ${accent}`}><ShieldCheck size={14} />{busy ? "Processing…" : "Place shielded order"}</button>

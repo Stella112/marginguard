@@ -447,3 +447,15 @@ export async function nextOrderIndex(seed: string, limit = 64) {
   }
   return limit;
 }
+
+/** The token and amount a live order is holding in reserve. Zero once cancelled or claimed. */
+export async function readVenueReserve(orderId: string): Promise<{ token: string; amount: bigint }> {
+  const [token, amount] = await call(MG.venue, "reserved_of", [orderId]);
+  return { token, amount: BigInt(amount) };
+}
+
+/**
+ * VenueOperation discriminants, in the order the Cairo enum declares them.
+ * Fund, Claim, Withdraw, Cancel - the pool deserializes by index, so order matters.
+ */
+export const VENUE_OP = { fund: "0x0", claim: "0x1", withdraw: "0x2", cancel: "0x3" } as const;

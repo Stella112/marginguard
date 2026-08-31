@@ -5,7 +5,7 @@ import type { STRK20_ACTION } from "@starknet-io/types-js";
 import { num } from "starknet";
 import { Database, ExternalLink, EyeOff, GitMerge, KeyRound, LockKeyhole } from "lucide-react";
 import { useStoreWallet } from "@/app/components/Wallet/walletContext";
-import { MG, readOrderState, readProvider } from "@/utils/marginguard";
+import { MG, VENUE_OP, readOrderState, readProvider, readVenueReserve } from "@/utils/marginguard";
 import { deriveOrder, unlockSeed } from "@/utils/keyvault";
 import { readSpotOrders, writeSpotOrders } from "./perpPackets";
 import styles from "@/app/terminal.module.css";
@@ -14,6 +14,8 @@ type Tab = "positions" | "orders" | "logs";
 type StoredOrder = {
   orderId: string;
   index?: string;
+  releasedToken?: string;
+  releasedAmount?: string;
   salt?: string;
   baseToken?: string;
   quoteToken?: string;
@@ -163,6 +165,75 @@ export function DataPanel() {
     }
   }
 
+  /**
+   * Cancels a live order and releases its reserve back to the venue balance.
+   *
+   * Routed through the pool, not called on the book directly: a direct call would put the
+   * canceller's address next to the order id on-chain and undo the venue's anonymity.
+   * The reserve is read first, because cancelling zeroes it.
+   */
+  async function cancelOrder(order: LiveOrder) {
+    setNotice("");
+    if (!account) { setNotice("Connect a wallet to cancel."); return; }
+    if (order.index === undefined) { setNotice("This order predates derived keys and cannot be cancelled."); return; }
+    try {
+      setBusy(`cancel:${order.orderId}`);
+      const reserve = await readVenueReserve(order.orderId);
+      setNotice("Sign to derive your trading keys, then confirm the cancellation.");
+      const seed = await unlockSeed(account);
+      const { ownerSecret } = deriveOrder(seed, Number(order.index));
+      const actions: STRK20_ACTION[] = [{
+        type: "invoke",
+        contract: num.toHex(MG.venue),
+        calldata: [VENUE_OP.cancel, "0x0", "0x0", "0x0", ownerSecret, num.toHex(order.orderId), "0x0", "0x0", "0x0", "0x0", "0x0"],
+      }];
+      const result = await account.strk20InvokeTransaction(actions);
+      await waitFor(result.transaction_hash);
+      writeStoredOrders((item) => item.orderId === order.orderId
+        ? { ...item, releasedToken: reserve.token, releasedAmount: reserve.amount.toString() }
+        : item);
+      setNotice("Order cancelled. The reserve is back in your venue balance - withdraw it to return it to a shielded note.");
+      window.dispatchEvent(new Event("marginguard:orders"));
+    } catch (error: any) {
+      setNotice(error?.message ?? String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  /** Pays a released venue balance back into a fresh shielded open note. */
+  async function withdrawReleased(order: LiveOrder) {
+    setNotice("");
+    if (!account) { setNotice("Connect a wallet to withdraw."); return; }
+    if (order.index === undefined || !order.releasedToken || !order.releasedAmount) return;
+    try {
+      setBusy(`withdraw:${order.orderId}`);
+      setNotice("Sign to derive your trading keys, then confirm the withdrawal.");
+      const seed = await unlockSeed(account);
+      const { ownerSecret } = deriveOrder(seed, Number(order.index));
+      const token = num.toHex(order.releasedToken);
+      const actions: STRK20_ACTION[] = [
+        { type: "transfer", token, amount: "OPEN", recipient: num.toHex(account.address) },
+        {
+          type: "invoke",
+          contract: num.toHex(MG.venue),
+          calldata: [VENUE_OP.withdraw, "0x0", token, num.toHex(BigInt(order.releasedAmount)), ownerSecret, "0x0", "0x0", "0x0", "0x0", "0x0", "${openNoteIds[0]}"],
+        },
+      ];
+      const result = await account.strk20InvokeTransaction(actions);
+      await waitFor(result.transaction_hash);
+      writeStoredOrders((item) => item.orderId === order.orderId
+        ? { ...item, releasedToken: undefined, releasedAmount: undefined }
+        : item);
+      setNotice("Withdrawn. The funds are back in a shielded note in your wallet.");
+      window.dispatchEvent(new Event("marginguard:orders"));
+    } catch (error: any) {
+      setNotice(error?.message ?? String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
   const tabs = [
     { id: "positions" as const, label: "Positions", count: 0 },
     { id: "orders" as const, label: "Dark pool orders", count: orders.length },
@@ -190,6 +261,8 @@ export function DataPanel() {
               <td><span className={styles.actionGroup}>
                 {order.matched && !order.claimed && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => claimOrder(order)}>{busy === `claim:${order.orderId}` ? "Claiming…" : "Claim"}</button>}
                 {order.live && !order.matched && other && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => matchOrder(order)}>{busy === `match:${order.orderId}` ? "Matching…" : "Match"}</button>}
+                {order.live && !order.matched && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => cancelOrder(order)}>{busy === `cancel:${order.orderId}` ? "Cancelling…" : "Cancel"}</button>}
+                {order.releasedAmount && <button className={styles.actionButton} disabled={Boolean(actionKey)} onClick={() => withdrawReleased(order)}>{busy === `withdraw:${order.orderId}` ? "Withdrawing…" : "Withdraw"}</button>}
                 <a href={"https://voyager.online/tx/" + (order.matchTx ?? order.placementTx)} target="_blank" rel="noreferrer" className={styles.txLink}><ExternalLink size={11} />view</a>
               </span></td>
             </tr>;
